@@ -285,6 +285,8 @@ class KnowledgeBaseManager:
         print(f"  [OK] CID: {pubchem_data['cid']}")
 
         props = pubchem_data.get('properties', {})
+        safety = pubchem_data.get('safety', {})
+        classification = pubchem_data.get('classification', {})
 
         # 构建基础数据
         chem = {
@@ -297,6 +299,27 @@ class KnowledgeBaseManager:
             "xlogp": str(props.get('XLogP', '')),
             "data_source": "PubChem"
         }
+
+        # 从PubChem安全数据中提取GHS分类（仅作为基础，后续LLM会覆盖）
+        if safety and not use_llm:
+            ghs_from_pubchem = []
+            if isinstance(safety, dict):
+                for key, val in safety.items():
+                    if isinstance(val, str) and '类别' in val:
+                        ghs_from_pubchem.append(val)
+                    elif isinstance(val, list):
+                        for item in val:
+                            if isinstance(item, str) and '类别' in item:
+                                ghs_from_pubchem.append(item)
+            if ghs_from_pubchem:
+                chem['ghs_classifications'] = ghs_from_pubchem
+
+        # 从PubChem分类数据中提取
+        if classification and not use_llm:
+            if isinstance(classification, dict):
+                ghhs = classification.get('ghs_classifications', [])
+                if ghhs and isinstance(ghhs, list):
+                    chem.setdefault('ghs_classifications', ghhs)
 
         # 使用LLM推断详细数据
         if use_llm:
@@ -483,7 +506,7 @@ def main():
     elif "--batch" in sys.argv:
         idx = sys.argv.index("--batch")
         batch_file = sys.argv[idx + 1]
-        with open(batch_file, 'r') as f:
+        with open(batch_file, 'r', encoding='utf-8') as f:
             for line in f:
                 line = line.strip()
                 if line and not line.startswith('#'):

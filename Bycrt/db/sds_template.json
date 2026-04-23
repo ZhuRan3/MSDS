@@ -1,0 +1,250 @@
+{
+  "_meta": {
+    "description": "SDS/MSDS 16章节结构化模板 (GB/T 16483-2008, GB/T 17519-2013)",
+    "version": "1.0.0"
+  },
+  "sections": [
+    {
+      "id": 1,
+      "title_cn": "化学品及企业标识",
+      "title_en": "Chemical Product and Company Identification",
+      "required": true,
+      "fields": [
+        {"key": "product_name_cn", "label": "产品名称(中文)", "type": "text", "source": "input"},
+        {"key": "product_name_en", "label": "产品名称(英文)", "type": "text", "source": "input|kb"},
+        {"key": "cas_number", "label": "CAS号", "type": "text", "source": "kb", "pattern": "\\d{2,7}-\\d{2}-\\d"},
+        {"key": "molecular_formula", "label": "分子式", "type": "text", "source": "kb"},
+        {"key": "molecular_weight", "label": "分子量", "type": "number", "source": "kb", "unit": "g/mol"},
+        {"key": "un_number", "label": "UN编号", "type": "text", "source": "kb"},
+        {"key": "ec_number", "label": "EC号", "type": "text", "source": "kb"},
+        {"key": "iupac_name", "label": "IUPAC名称", "type": "text", "source": "kb"},
+        {"key": "recommended_use", "label": "推荐用途", "type": "text", "source": "input|ai"},
+        {"key": "supplier_info", "label": "供应商信息", "type": "text", "source": "input"},
+        {"key": "emergency_phone", "label": "应急咨询电话", "type": "text", "source": "input"}
+      ],
+      "template": "# 第一部分：化学品及企业标识\n\n| 项目 | 内容 |\n|------|------|\n| 化学品名称 | {product_name_cn} |\n| 英文名称 | {product_name_en} |\n| CAS号 | {cas_number} |\n| 分子式 | {molecular_formula} |\n| 分子量 | {molecular_weight} g/mol |\n| UN编号 | {un_number} |\n| EC号 | {ec_number} |\n| IUPAC名称 | {iupac_name} |\n| 推荐用途 | {recommended_use} |\n| 供应商 | {supplier_info} |\n| 应急电话 | {emergency_phone} |"
+    },
+    {
+      "id": 2,
+      "title_cn": "危险性概述",
+      "title_en": "Hazards Identification",
+      "required": true,
+      "fields": [
+        {"key": "ghs_classifications", "label": "GHS危险性类别", "type": "list", "source": "classification"},
+        {"key": "signal_word", "label": "信号词", "type": "text", "source": "classification"},
+        {"key": "hazard_statements", "label": "危险性说明(H码)", "type": "list", "source": "classification"},
+        {"key": "precautionary_statements", "label": "防范说明(P码)", "type": "list", "source": "classification"},
+        {"key": "pictograms", "label": "象形图", "type": "list", "source": "classification"},
+        {"key": "emergency_overview", "label": "紧急概述", "type": "text", "source": "ai", "min_length": 100, "max_length": 300},
+        {"key": "physical_hazards", "label": "物理危害", "type": "text", "source": "classification|ai"},
+        {"key": "health_hazards", "label": "健康危害", "type": "text", "source": "classification|ai"},
+        {"key": "environmental_hazards", "label": "环境危害", "type": "text", "source": "classification|ai"}
+      ]
+    },
+    {
+      "id": 3,
+      "title_cn": "成分/组成信息",
+      "title_en": "Composition/Information on Ingredients",
+      "required": true,
+      "fields": [
+        {"key": "chemical_type", "label": "物质/混合物", "type": "enum", "values": ["物质", "混合物"], "source": "input"},
+        {"key": "components", "label": "组分列表", "type": "table", "source": "input|kb",
+         "columns": ["成分名称", "CAS号", "浓度(%)", "EC号", "危险性分类"]}
+      ]
+    },
+    {
+      "id": 4,
+      "title_cn": "急救措施",
+      "title_en": "First-Aid Measures",
+      "required": true,
+      "fields": [
+        {"key": "inhalation", "label": "吸入", "type": "text", "source": "ai|template", "min_length": 30},
+        {"key": "skin_contact", "label": "皮肤接触", "type": "text", "source": "ai|template", "min_length": 30},
+        {"key": "eye_contact", "label": "眼睛接触", "type": "text", "source": "ai|template", "min_length": 30},
+        {"key": "ingestion", "label": "食入", "type": "text", "source": "ai|template", "min_length": 30},
+        {"key": "rescuer_protection", "label": "救援人员防护", "type": "text", "source": "ai|template"},
+        {"key": "physician_notes", "label": "对医生的提示", "type": "text", "source": "ai|template"}
+      ]
+    },
+    {
+      "id": 5,
+      "title_cn": "消防措施",
+      "title_en": "Fire-Fighting Measures",
+      "required": true,
+      "fields": [
+        {"key": "hazard_characteristics", "label": "危险特性", "type": "text", "source": "ai|kb", "min_length": 40},
+        {"key": "extinguishing_media", "label": "适用灭火剂", "type": "text", "source": "ai|template", "min_length": 20},
+        {"key": "prohibited_media", "label": "禁止使用的灭火剂", "type": "text", "source": "ai|template"},
+        {"key": "firefighting_advice", "label": "消防建议", "type": "text", "source": "ai|template"},
+        {"key": "hazardous_combustion", "label": "危险分解产物", "type": "text", "source": "ai|kb"}
+      ]
+    },
+    {
+      "id": 6,
+      "title_cn": "泄漏应急处理",
+      "title_en": "Accidental Release Measures",
+      "required": true,
+      "fields": [
+        {"key": "personal_precautions", "label": "人员防护措施", "type": "text", "source": "ai|template", "min_length": 40},
+        {"key": "environmental_precautions", "label": "环境保护措施", "type": "text", "source": "ai|template", "min_length": 30},
+        {"key": "containment_cleanup", "label": "收容与清除方法", "type": "text", "source": "ai|template", "min_length": 40},
+        {"key": "reference_sections", "label": "参考其他章节", "type": "text", "source": "template", "default": "参见第8部分和第13部分"}
+      ]
+    },
+    {
+      "id": 7,
+      "title_cn": "操作处置与储存",
+      "title_en": "Handling and Storage",
+      "required": true,
+      "fields": [
+        {"key": "handling_precautions", "label": "操作注意事项", "type": "text", "source": "ai|template", "min_length": 50},
+        {"key": "storage_conditions", "label": "储存条件", "type": "text", "source": "ai|template", "min_length": 50},
+        {"key": "incompatibles", "label": "禁配物", "type": "text", "source": "kb|ai"}
+      ]
+    },
+    {
+      "id": 8,
+      "title_cn": "接触控制/个体防护",
+      "title_en": "Exposure Controls/Personal Protection",
+      "required": true,
+      "fields": [
+        {"key": "oel_table", "label": "职业接触限值", "type": "table", "source": "kb",
+         "columns": ["标准", "限值类型", "数值", "单位"]},
+        {"key": "engineering_controls", "label": "工程控制", "type": "text", "source": "ai|template"},
+        {"key": "respiratory_protection", "label": "呼吸防护", "type": "text", "source": "ai|template"},
+        {"key": "eye_protection", "label": "眼睛防护", "type": "text", "source": "template"},
+        {"key": "skin_protection", "label": "皮肤防护", "type": "text", "source": "template"},
+        {"key": "hygiene_measures", "label": "卫生措施", "type": "text", "source": "template"}
+      ]
+    },
+    {
+      "id": 9,
+      "title_cn": "理化特性",
+      "title_en": "Physical and Chemical Properties",
+      "required": true,
+      "fields": [
+        {"key": "appearance", "label": "外观", "type": "text", "source": "kb|ai"},
+        {"key": "odor", "label": "气味", "type": "text", "source": "kb|ai"},
+        {"key": "melting_point", "label": "熔点", "type": "number", "source": "kb", "unit": "°C"},
+        {"key": "boiling_point", "label": "沸点", "type": "number", "source": "kb", "unit": "°C"},
+        {"key": "flash_point", "label": "闪点", "type": "number", "source": "kb", "unit": "°C"},
+        {"key": "density", "label": "密度", "type": "number", "source": "kb", "unit": "g/cm³"},
+        {"key": "vapor_pressure", "label": "蒸气压", "type": "number", "source": "kb", "unit": "kPa"},
+        {"key": "solubility", "label": "溶解性", "type": "text", "source": "kb|ai"},
+        {"key": "autoignition_temp", "label": "自燃温度", "type": "number", "source": "kb", "unit": "°C"},
+        {"key": "explosion_limits", "label": "爆炸极限", "type": "text", "source": "kb"},
+        {"key": "ph", "label": "pH值", "type": "text", "source": "kb|ai"},
+        {"key": "partition_coefficient", "label": "辛醇/水分配系数", "type": "text", "source": "kb"}
+      ],
+      "template": "| 特性 | 数值 |\n|------|------|\n| 外观 | {appearance} |\n| 气味 | {odor} |\n| 熔点 | {melting_point} °C |\n| 沸点 | {boiling_point} °C |\n| 闪点 | {flash_point} °C |\n| 密度 | {density} g/cm³ |\n| 蒸气压 | {vapor_pressure} kPa |\n| 溶解性 | {solubility} |\n| 自燃温度 | {autoignition_temp} °C |\n| 爆炸极限 | {explosion_limits} |\n| pH值 | {ph} |\n| 辛醇/水分配系数 | {partition_coefficient} |"
+    },
+    {
+      "id": 10,
+      "title_cn": "稳定性和反应性",
+      "title_en": "Stability and Reactivity",
+      "required": true,
+      "fields": [
+        {"key": "stability", "label": "稳定性", "type": "text", "source": "ai|template"},
+        {"key": "conditions_to_avoid", "label": "应避免的条件", "type": "text", "source": "ai|kb"},
+        {"key": "incompatible_materials", "label": "禁配物", "type": "text", "source": "kb|ai"},
+        {"key": "hazardous_decomposition", "label": "危险分解产物", "type": "text", "source": "kb|ai"},
+        {"key": "polymerization", "label": "聚合危害", "type": "text", "source": "ai"}
+      ]
+    },
+    {
+      "id": 11,
+      "title_cn": "毒理学信息",
+      "title_en": "Toxicological Information",
+      "required": true,
+      "fields": [
+        {"key": "ld50_oral", "label": "LD50经口", "type": "text", "source": "kb", "unit": "mg/kg"},
+        {"key": "ld50_dermal", "label": "LD50经皮", "type": "text", "source": "kb", "unit": "mg/kg"},
+        {"key": "lc50_inhalation", "label": "LC50吸入", "type": "text", "source": "kb", "unit": "mg/L"},
+        {"key": "skin_corrosion_irritation", "label": "皮肤腐蚀/刺激", "type": "text", "source": "classification|kb"},
+        {"key": "eye_damage_irritation", "label": "严重眼损伤/眼刺激", "type": "text", "source": "classification|kb"},
+        {"key": "sensitization", "label": "致敏性", "type": "text", "source": "kb|ai"},
+        {"key": "mutagenicity", "label": "致突变性", "type": "text", "source": "kb|ai"},
+        {"key": "carcinogenicity", "label": "致癌性", "type": "text", "source": "kb|ai"},
+        {"key": "reproductive_toxicity", "label": "生殖毒性", "type": "text", "source": "kb|ai"},
+        {"key": "stot_single", "label": "特异性靶器官毒性-单次", "type": "text", "source": "classification|kb"},
+        {"key": "stot_repeated", "label": "特异性靶器官毒性-反复", "type": "text", "source": "kb|ai"},
+        {"key": "aspiration_hazard", "label": "吸入危害", "type": "text", "source": "classification|kb"}
+      ]
+    },
+    {
+      "id": 12,
+      "title_cn": "生态学信息",
+      "title_en": "Ecological Information",
+      "required": true,
+      "fields": [
+        {"key": "ecotoxicity", "label": "生态毒性", "type": "text", "source": "kb|ai"},
+        {"key": "persistence", "label": "持久性和降解性", "type": "text", "source": "kb|ai"},
+        {"key": "bioaccumulation", "label": "生物富集潜力", "type": "text", "source": "kb|ai"},
+        {"key": "mobility", "label": "土壤中的迁移性", "type": "text", "source": "kb|ai"},
+        {"key": "other_adverse", "label": "其他有害影响", "type": "text", "source": "ai"}
+      ]
+    },
+    {
+      "id": 13,
+      "title_cn": "废弃处置",
+      "title_en": "Disposal Considerations",
+      "required": true,
+      "fields": [
+        {"key": "disposal_method", "label": "处置方法", "type": "text", "source": "ai|template"},
+        {"key": "container_disposal", "label": "容器处理", "type": "text", "source": "template"},
+        {"key": "disposal_precautions", "label": "处置注意事项", "type": "text", "source": "ai|template"}
+      ]
+    },
+    {
+      "id": 14,
+      "title_cn": "运输信息",
+      "title_en": "Transport Information",
+      "required": true,
+      "fields": [
+        {"key": "un_number", "label": "UN编号", "type": "text", "source": "kb"},
+        {"key": "proper_shipping_name", "label": "正式运输名称", "type": "text", "source": "kb|ai"},
+        {"key": "transport_class", "label": "运输危险类别", "type": "text", "source": "kb"},
+        {"key": "packing_group", "label": "包装类别", "type": "text", "source": "kb"},
+        {"key": "marine_pollutant", "label": "海洋污染物", "type": "text", "source": "classification"},
+        {"key": "special_precautions", "label": "特殊注意事项", "type": "text", "source": "ai"}
+      ],
+      "template": "| 项目 | 内容 |\n|------|------|\n| UN编号 | {un_number} |\n| 正式运输名称 | {proper_shipping_name} |\n| 运输危险类别 | {transport_class} |\n| 包装类别 | {packing_group} |\n| 海洋污染物 | {marine_pollutant} |\n| 特殊注意事项 | {special_precautions} |"
+    },
+    {
+      "id": 15,
+      "title_cn": "法规信息",
+      "title_en": "Regulatory Information",
+      "required": true,
+      "fields": [
+        {"key": "cn_regulations", "label": "中国法规", "type": "list", "source": "template|ai"},
+        {"key": "international_regulations", "label": "国际法规", "type": "list", "source": "template"}
+      ],
+      "defaults": {
+        "cn_regulations": [
+          "《危险化学品安全管理条例》（国务院令第591号）",
+          "《危险化学品目录》（2015版）",
+          "GB/T 16483-2008 化学品安全技术说明书 内容和项目顺序",
+          "GB/T 17519-2013 化学品安全技术说明书编写指南",
+          "GB 30000.2~29 化学品分类和标签规范",
+          "GBZ 2.1 工作场所有害因素职业接触限值 第1部分：化学有害因素"
+        ]
+      }
+    },
+    {
+      "id": 16,
+      "title_cn": "其他信息",
+      "title_en": "Other Information",
+      "required": true,
+      "fields": [
+        {"key": "sds_number", "label": "SDS编号", "type": "text", "source": "auto"},
+        {"key": "version", "label": "版本号", "type": "text", "source": "auto"},
+        {"key": "revision_date", "label": "修订日期", "type": "date", "source": "auto"},
+        {"key": "data_sources", "label": "数据来源", "type": "list", "source": "auto"},
+        {"key": "disclaimer", "label": "免责声明", "type": "text", "source": "template"}
+      ],
+      "defaults": {
+        "disclaimer": "本安全技术说明书中的信息基于我们目前所掌握的知识和经验，不保证其中所含信息在任何特定情况下的准确性和完整性。本文件中的信息仅供参考，使用者应根据实际应用场景进行独立判断。"
+      }
+    }
+  ]
+}

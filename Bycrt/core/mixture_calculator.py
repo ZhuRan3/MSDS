@@ -137,6 +137,7 @@ class Component:
     # 其他属性
     flash_point: Optional[float] = None    # 闪点 (°C)
     boiling_point: Optional[float] = None  # 沸点 (°C)
+    initial_boiling_point: Optional[float] = None  # 初沸点 (°C)
     is_unknown_toxicity: bool = False      # 是否未知毒性
 
 
@@ -157,6 +158,8 @@ class MixtureResult:
     flammability_class: str = ""
     # 未知毒性比例
     unknown_percentage: float = 0.0
+    # P码
+    p_codes: Dict[str, List[str]] = field(default_factory=dict)
     # 计算过程记录
     calculation_log: List[str] = field(default_factory=list)
 
@@ -290,6 +293,15 @@ class MixtureCalculator:
                     route if route != "inhalation" else "inhalation_vapor", {}
                 )
                 info = table.get(cat, {})
+                # 计算置信度: ATE距阈值越远置信度越高
+                confidence = min(0.95, 0.7 + 0.25 * (1.0 - ate / threshold))
+                basis = {
+                    "method": "ate_formula",
+                    "rule_reference": "UN GHS 3.1.3",
+                    "ate_value": round(ate, 2),
+                    "threshold": threshold,
+                    "route": route,
+                }
                 return {
                     "hazard": f"急性毒性-{route} Cat {cat}",
                     "category": cat,
@@ -297,6 +309,8 @@ class MixtureCalculator:
                     "signal": info.get("signal", "警告"),
                     "ate": ate,
                     "route": route,
+                    "classification_confidence": round(confidence, 2),
+                    "classification_basis": basis,
                 }
         # ATE > 5000，不分类
         return None
@@ -330,6 +344,8 @@ class MixtureCalculator:
                 "h_code": "H314",
                 "signal": "危险",
                 "reason": f"皮肤腐蚀Cat1组分总浓度{cat1_conc:.1f}%≥5%",
+                "classification_confidence": 0.9,
+                "classification_basis": {"method": "concentration_limit", "rule_reference": "UN GHS 3.2.3", "threshold": 5.0, "actual": round(cat1_conc, 1)},
             })
             self.result.calculation_log.append(f"  → 皮肤腐蚀Cat1组分总浓度{cat1_conc:.1f}%≥5% → Cat 1")
         elif cat1_conc >= 1.0:
@@ -338,6 +354,8 @@ class MixtureCalculator:
                 "h_code": "H315",
                 "signal": "警告",
                 "reason": f"皮肤腐蚀Cat1组分总浓度{cat1_conc:.1f}%≥1%但<5%",
+                "classification_confidence": 0.7,
+                "classification_basis": {"method": "concentration_limit", "rule_reference": "UN GHS 3.2.3", "threshold": 1.0, "actual": round(cat1_conc, 1)},
             })
             self.result.calculation_log.append(f"  → 皮肤腐蚀Cat1组分总浓度{cat1_conc:.1f}%，≥1%但<5% → Cat 2")
 
@@ -347,6 +365,8 @@ class MixtureCalculator:
                 "h_code": "H315",
                 "signal": "警告",
                 "reason": f"皮肤刺激Cat2组分总浓度{cat2_conc:.1f}%≥10%",
+                "classification_confidence": 0.9,
+                "classification_basis": {"method": "concentration_limit", "rule_reference": "UN GHS 3.2.3", "threshold": 10.0, "actual": round(cat2_conc, 1)},
             })
             self.result.calculation_log.append(f"  → 皮肤刺激Cat2组分总浓度{cat2_conc:.1f}%≥10% → Cat 2")
 
@@ -389,6 +409,8 @@ class MixtureCalculator:
                 "h_code": "H318",
                 "signal": "危险",
                 "reason": f"严重眼损伤Cat1组分总浓度{cat1_conc:.1f}%≥3%",
+                "classification_confidence": 0.9,
+                "classification_basis": {"method": "concentration_limit", "rule_reference": "UN GHS 3.3.3", "threshold": 3.0, "actual": round(cat1_conc, 1)},
             })
             self.result.calculation_log.append(f"  → 严重眼损伤Cat1组分总浓度{cat1_conc:.1f}%≥3% → Cat 1")
 
@@ -398,6 +420,8 @@ class MixtureCalculator:
                 "h_code": "H319",
                 "signal": "警告",
                 "reason": f"眼刺激Cat2A组分总浓度{cat2a_conc:.1f}%≥10%",
+                "classification_confidence": 0.9,
+                "classification_basis": {"method": "concentration_limit", "rule_reference": "UN GHS 3.3.3", "threshold": 10.0, "actual": round(cat2a_conc, 1)},
             })
             self.result.calculation_log.append(f"  → 眼刺激Cat2A组分总浓度{cat2a_conc:.1f}%≥10% → Cat 2A")
         elif cat2a_conc >= 1.0 and not results:
@@ -406,6 +430,8 @@ class MixtureCalculator:
                 "h_code": "H319",
                 "signal": "警告",
                 "reason": f"眼刺激Cat2A组分总浓度{cat2a_conc:.1f}%≥1%但<10%，需进一步评估",
+                "classification_confidence": 0.6,
+                "classification_basis": {"method": "concentration_limit", "rule_reference": "UN GHS 3.3.3", "threshold": 1.0, "actual": round(cat2a_conc, 1)},
             })
             self.result.calculation_log.append(f"  → 眼刺激Cat2A组分总浓度{cat2a_conc:.1f}%，≥1%但<10% → 考虑分类")
 
@@ -439,6 +465,8 @@ class MixtureCalculator:
                     "h_code": h_code,
                     "signal": "危险" if "Cat 1" in hazard_type else "警告",
                     "reason": f"总浓度{total_conc:.1f}%≥{cut_off}% (触发组分: {', '.join(triggering)})",
+                    "classification_confidence": 0.6,
+                    "classification_basis": {"method": "generic_cutoff", "rule_reference": "UN GHS 1.3.3", "cut_off": cut_off, "actual": round(total_conc, 1)},
                 })
                 self.result.calculation_log.append(
                     f"  {hazard_type}: 总浓度{total_conc:.1f}%≥{cut_off}% → 触发"
@@ -480,37 +508,57 @@ class MixtureCalculator:
             self.result.calculation_log.append(f"  → 易燃组分总浓度{flammable_conc:.1f}%<10%，不分类")
             return None
 
-        # 取最低闪点为混合物闪点参考
+        # 取最低闪点为混合物闪点参考，同时取最低初沸点
         if flash_points:
             min_fp = min(flash_points, key=lambda x: x[1])
+            # 获取最低初沸点
+            initial_bps = [(c.name, c.initial_boiling_point) for c in self.components if c.initial_boiling_point is not None]
+            min_ibp = min(initial_bps, key=lambda x: x[1]) if initial_bps else None
+            ibp_val = min_ibp[1] if min_ibp else None
+
             self.result.calculation_log.append(
                 f"  → 易燃组分总浓度{flammable_conc:.1f}%≥10%"
             )
             self.result.calculation_log.append(
                 f"  → 最低闪点组分: {min_fp[0]} ({min_fp[1]}°C)"
             )
+            if ibp_val is not None:
+                self.result.calculation_log.append(
+                    f"  → 最低初沸点组分: {min_ibp[0]} ({ibp_val}°C)"
+                )
 
             if min_fp[1] < 23:
-                if flammable_conc >= 50:  # 初沸点≤35°C假设不满足时
-                    classification = "易燃液体 Cat 2"
-                    h_code = "H225"
+                # Cat 1: 闪点<23°C 且 初沸点<=35°C (H224)
+                # Cat 2: 闪点<23°C 且 初沸点>35°C  (H225)
+                if ibp_val is not None and ibp_val <= 35:
+                    classification = "易燃液体 Cat 1"
+                    h_code = "H224"
+                    ibp_note = f"，初沸点{ibp_val}°C<=35°C"
                 else:
                     classification = "易燃液体 Cat 2"
                     h_code = "H225"
+                    ibp_note = (f"，初沸点{ibp_val}°C>35°C" if ibp_val is not None
+                                else "，初沸点数据缺失，默认Cat2")
             elif min_fp[1] < 60:
                 classification = "易燃液体 Cat 3"
                 h_code = "H226"
+                ibp_note = ""
             else:
                 classification = "易燃液体 Cat 4" if min_fp[1] <= 93 else ""
                 h_code = "H227" if min_fp[1] <= 93 else ""
+                ibp_note = ""
 
             if classification:
+                confidence = 0.9 if (ibp_val is not None and min_fp[1] < 23) else 0.75
                 return {
                     "hazard": classification,
                     "h_code": h_code,
                     "signal": "危险",
-                    "reason": f"易燃组分总浓度{flammable_conc:.1f}%，最低闪点参考{min_fp[1]}°C",
+                    "reason": f"易燃组分总浓度{flammable_conc:.1f}%，最低闪点参考{min_fp[1]}°C{ibp_note}",
                     "flash_point_ref": min_fp[1],
+                    "initial_boiling_point_ref": ibp_val,
+                    "classification_confidence": confidence,
+                    "classification_basis": {"method": "flash_point_based", "rule_reference": "UN GHS 2.6", "flash_point": min_fp[1], "initial_boiling_point": ibp_val},
                 }
 
         # 有易燃组分但无闪点数据
@@ -519,6 +567,8 @@ class MixtureCalculator:
             "h_code": "H225/H226",
             "signal": "危险",
             "reason": f"易燃组分总浓度{flammable_conc:.1f}%≥10%，但缺少闪点数据",
+            "classification_confidence": 0.5,
+            "classification_basis": {"method": "flash_point_based", "rule_reference": "UN GHS 2.6", "note": "缺少闪点数据"},
         }
 
     def calculate_all(self) -> MixtureResult:
@@ -573,10 +623,240 @@ class MixtureCalculator:
             self.result.classifications.append(flam_result)
             self.result.flammability_class = flam_result["hazard"]
 
+        # 7. 水生环境危害
+        aquatic_results = self.check_aquatic_toxicity()
+        self.result.classifications.extend(aquatic_results)
+
+        # 8. 金属腐蚀
+        corrosion_result = self.check_metal_corrosion()
+        if corrosion_result:
+            self.result.classifications.append(corrosion_result)
+
+        # 9. 桥接原则评估
+        bridging = self.check_bridging_principles()
+        if bridging:
+            self.result.calculation_log.append(f"\n{'='*60}")
+            self.result.calculation_log.append("桥接原则评估")
+            self.result.calculation_log.append(f"{'='*60}")
+            for bp in bridging:
+                self.result.calculation_log.append(
+                    f"  {bp['principle']}: 适用={bp['applicable']}, {bp.get('note', '')}"
+                )
+
         # 汇总
         self._summarize()
 
         return self.result
+
+    def check_aquatic_toxicity(self) -> List[Dict]:
+        """检查水生环境危害（加和法）"""
+        results = []
+        self.result.calculation_log.append(f"\n{'='*60}")
+        self.result.calculation_log.append("水生环境危害检查")
+        self.result.calculation_log.append(f"{'='*60}")
+
+        # 简化实现：检查各组分的GHS分类中是否有水生危害
+        aquatic_components = []
+        for c in self.components:
+            for cls_str in c.ghs_classifications:
+                if "水生" in cls_str or "水环境" in cls_str:
+                    cat = ""
+                    if "急性" in cls_str and "Cat 1" in cls_str:
+                        cat = "急性1"
+                    elif "急性" in cls_str and "Cat 2" in cls_str:
+                        cat = "急性2"
+                    elif "长期" in cls_str and "Cat 1" in cls_str:
+                        cat = "长期1"
+                    elif "长期" in cls_str and "Cat 2" in cls_str:
+                        cat = "长期2"
+                    elif "长期" in cls_str and "Cat 3" in cls_str:
+                        cat = "长期3"
+
+                    if cat:
+                        aquatic_components.append({
+                            "name": c.name,
+                            "conc": c.concentration,
+                            "cat": cat,
+                            "cls": cls_str,
+                        })
+                        self.result.calculation_log.append(
+                            f"  {c.name}({c.concentration}%): {cls_str}"
+                        )
+
+        # 加和法判定
+        if not aquatic_components:
+            self.result.calculation_log.append("  -> 无水生危害组分")
+            return results
+
+        # 简化规则：
+        # 长期Cat1组分 ≥ 0.1% (有M-factor时更低) → 长期Cat1
+        # 长期Cat1组分 ≥ 1% 或 Cat2组分累加 → 长期Cat2
+        cat1_long_conc = sum(a["conc"] for a in aquatic_components if "长期1" in a["cat"])
+        cat2_long_conc = sum(a["conc"] for a in aquatic_components if "长期2" in a["cat"])
+        cat1_acute_conc = sum(a["conc"] for a in aquatic_components if "急性1" in a["cat"])
+
+        if cat1_long_conc >= 0.1:
+            results.append({
+                "hazard": "危害水生环境-长期 Cat 1",
+                "h_code": "H410",
+                "signal": "警告",
+                "reason": f"长期Cat1组分总浓度{cat1_long_conc:.1f}%>=0.1%",
+                "classification_confidence": 0.8,
+                "classification_basis": {"method": "summation_method", "rule_reference": "UN GHS 4.1.3", "threshold": 0.1, "actual": round(cat1_long_conc, 2)},
+            })
+            self.result.calculation_log.append(f"  -> 长期Cat1组分{cat1_long_conc:.1f}%>=0.1% -> 长期Cat1")
+        elif cat1_long_conc >= 1.0 or cat2_long_conc >= 2.5:
+            results.append({
+                "hazard": "危害水生环境-长期 Cat 2",
+                "h_code": "H411",
+                "signal": "警告",
+                "reason": f"长期Cat1组分{cat1_long_conc:.1f}%或Cat2组分{cat2_long_conc:.1f}%",
+                "classification_confidence": 0.7,
+                "classification_basis": {"method": "summation_method", "rule_reference": "UN GHS 4.1.3", "cat1_conc": round(cat1_long_conc, 2), "cat2_conc": round(cat2_long_conc, 2)},
+            })
+            self.result.calculation_log.append(f"  -> 触发长期Cat2")
+
+        if cat1_acute_conc >= 1.0:
+            results.append({
+                "hazard": "危害水生环境-急性 Cat 1",
+                "h_code": "H400",
+                "signal": "警告",
+                "reason": f"急性Cat1组分总浓度{cat1_acute_conc:.1f}%>=1%",
+                "classification_confidence": 0.8,
+                "classification_basis": {"method": "summation_method", "rule_reference": "UN GHS 4.1.3", "threshold": 1.0, "actual": round(cat1_acute_conc, 2)},
+            })
+
+        if not results:
+            self.result.calculation_log.append("  -> 各组分浓度未达触发阈值")
+
+        return results
+
+    def check_bridging_principles(self) -> List[Dict]:
+        """
+        桥接原则评估（简化实现）
+
+        桥接原则用于当混合物整体数据不可用时，利用已知相关混合物的分类结果推断。
+        参考: UN GHS 第1.4章 桥接原则
+        """
+        results = []
+
+        # 稀释原则: 如果已分类混合物被低危害稀释剂稀释，分类不变或降级
+        non_hazardous = []
+        hazardous = []
+        for c in self.components:
+            has_hazard = bool(c.ghs_classifications) or c.flash_point is not None
+            if has_hazard:
+                hazardous.append(c)
+            else:
+                non_hazardous.append(c)
+
+        if non_hazardous and hazardous:
+            non_hz_conc = sum(c.concentration for c in non_hazardous)
+            results.append({
+                "principle": "稀释原则",
+                "applicable": True,
+                "note": f"含{len(non_hazardous)}种非危害成分(总{non_hz_conc:.1f}%)，可考虑稀释效应",
+                "confidence": 0.6,
+                "basis": {"method": "dilution", "rule_reference": "UN GHS 1.4.2.1",
+                          "non_hazardous_pct": round(non_hz_conc, 1)},
+            })
+        else:
+            results.append({
+                "principle": "稀释原则",
+                "applicable": False,
+                "note": "无非危害稀释成分",
+                "confidence": 0.0,
+            })
+
+        # 批次原则: 标记为可复用（需要外部提供历史批次信息）
+        results.append({
+            "principle": "批次原则",
+            "applicable": False,
+            "note": "需外部提供历史批次分类数据方可应用",
+            "confidence": 0.0,
+            "basis": {"method": "batching", "rule_reference": "UN GHS 1.4.3"},
+        })
+
+        # 插值原则: 需要两个已分类混合物A和B，当前混合物C介于两者之间
+        results.append({
+            "principle": "插值原则",
+            "applicable": False,
+            "note": "需外部提供已分类的参照混合物数据方可应用",
+            "confidence": 0.0,
+            "basis": {"method": "interpolation", "rule_reference": "UN GHS 1.4.4"},
+        })
+
+        # 气雾剂原则: 如果非气雾形式已分类，气雾形式可等同
+        # 检测组分中是否有推进剂
+        propellant_keywords = ["丙烷", "丁烷", "异丁烷", "二氧化碳", "氮气", "氩气"]
+        has_propellant = any(
+            any(kw in c.name for kw in propellant_keywords)
+            for c in self.components
+        )
+        if has_propellant:
+            results.append({
+                "principle": "气雾剂原则",
+                "applicable": True,
+                "note": "含推进剂成分，气雾形式分类可等同非气雾形式",
+                "confidence": 0.7,
+                "basis": {"method": "aerosol", "rule_reference": "UN GHS 1.4.7"},
+            })
+
+        return results
+
+    def check_metal_corrosion(self) -> Optional[Dict]:
+        """检查金属腐蚀"""
+        self.result.calculation_log.append(f"\n{'='*60}")
+        self.result.calculation_log.append("金属腐蚀检查")
+        self.result.calculation_log.append(f"{'='*60}")
+
+        for c in self.components:
+            for cls_str in c.ghs_classifications:
+                if "金属腐蚀" in cls_str or "腐蚀金属" in cls_str:
+                    self.result.calculation_log.append(
+                        f"  {c.name}({c.concentration}%): {cls_str}"
+                    )
+                    return {
+                        "hazard": "金属腐蚀物 Cat 1",
+                        "h_code": "H290",
+                        "signal": "警告",
+                        "reason": f"含金属腐蚀组分: {c.name}",
+                        "classification_confidence": 0.8,
+                        "classification_basis": {"method": "generic_cutoff", "rule_reference": "UN GHS 2.14", "component": c.name},
+                    }
+
+        self.result.calculation_log.append("  -> 无触发")
+        return None
+
+    def generate_p_codes(self) -> Dict[str, List[str]]:
+        """根据所有分类结果生成P码"""
+        ghs_path = Path(__file__).resolve().parent.parent / "db" / "ghs_mappings.json"
+        p_mapping = {}
+        if ghs_path.exists():
+            with open(ghs_path, "r", encoding="utf-8") as f:
+                ghs_data = json.load(f)
+            p_mapping = ghs_data.get("hazard_class_to_p_codes", {})
+
+        all_p = {"prevention": [], "response": [], "storage": [], "disposal": []}
+
+        for cls in self.result.classifications:
+            hazard = cls.get("hazard", "")
+            # 精确匹配
+            p_codes = p_mapping.get(hazard, {})
+
+            # 模糊匹配
+            if not p_codes:
+                for key, val in p_mapping.items():
+                    if key in hazard or any(kw in hazard for kw in key.split()):
+                        p_codes = val
+                        break
+
+            for group in ["prevention", "response", "storage", "disposal"]:
+                for code in p_codes.get(group, []):
+                    if code not in all_p[group]:
+                        all_p[group].append(code)
+
+        return all_p
 
     def _summarize(self):
         """汇总结果"""
@@ -594,6 +874,13 @@ class MixtureCalculator:
 
         self.result.h_codes = h_codes
         self.result.signal_word = "危险" if has_danger else "警告"
+
+        # 生成P码
+        p_codes = self.generate_p_codes()
+        if p_codes:
+            # 把P码注入每个分类结果
+            for cls in self.result.classifications:
+                cls["p_codes"] = p_codes
 
         self.result.calculation_log.append(f"\n{'='*60}")
         self.result.calculation_log.append("分类汇总")
@@ -684,6 +971,10 @@ def build_component(name: str, cas: str, concentration: float) -> Component:
         comp.lc50_inhalation = _parse_numeric(kb_data.get("lc50_inhalation"))
         comp.flash_point = _parse_numeric(kb_data.get("flash_point"))
         comp.boiling_point = _parse_numeric(kb_data.get("boiling_point"))
+        # 初沸点优先使用initial_boiling_point字段，否则用boiling_point近似
+        comp.initial_boiling_point = _parse_numeric(kb_data.get("initial_boiling_point"))
+        if comp.initial_boiling_point is None and comp.boiling_point is not None:
+            comp.initial_boiling_point = comp.boiling_point
 
         # GHS分类列表
         ghs = kb_data.get("ghs_classifications", [])
