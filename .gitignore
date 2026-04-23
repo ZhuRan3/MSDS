@@ -1,1 +1,29 @@
 .DS_Store
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+*.egg
+venv/
+.venv/
+
+# 环境变量（含API Key）
+backend/.env
+
+# 数据库文件
+backend/msds.db
+
+# 输出文件
+backend/output/
+
+# Node
+frontend/node_modules/
+frontend/dist/
+
+# IDE
+.vscode/
+.idea/
+
+# 系统文件
+Thumbs.db
