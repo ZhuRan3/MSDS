@@ -1901,23 +1901,140 @@ def generate_mixture_sds(components_data: List[dict],
             gen.set_chemical_data(comp)
             break
 
-    # 混合物模式：清空S1（化学品标识）— 名称由用户指定，其他字段不适用
+    # 关键：设置混合物分类结果 → 填充S2（GHS分类、H码、P码、象形图、信号词）
+    if mixture_classifications:
+        gen.set_classification(mixture_classifications)
+
+    # S3：设置混合物组分表
+    s3 = gen.document.sections[3]
+    s3.fields["chemical_type"] = FieldValue(value="混合物", source="template")
+    comp_table = []
+    for comp in components_data:
+        name = comp.get("chemical_name_cn", comp.get("name", ""))
+        cas = comp.get("cas_number", comp.get("cas", ""))
+        conc = comp.get("concentration", "")
+        ghs_raw = comp.get("ghs_classifications", "")
+        if isinstance(ghs_raw, list):
+            ghs = ", ".join(str(g) for g in ghs_raw)
+        else:
+            ghs = str(ghs_raw) if ghs_raw else ""
+        comp_table.append({
+            "name": name, "cas": cas,
+            "concentration": conc, "ghs_classifications": ghs,
+        })
+    s3.fields["components"] = FieldValue(value=comp_table, source="input")
+
+    # 混合物模式：清空S1（化学品标识）— 混合物没有单一CAS/分子式，标记"不适用"
     s1 = gen.document.sections[1]
     for key in ["cas_number", "molecular_formula", "molecular_weight",
-                "un_number", "ec_number", "iupac_name", "product_name_en"]:
-        s1.fields.pop(key, None)
+                "ec_number", "iupac_name"]:
+        s1.fields[key] = FieldValue(value="不适用", source="template")
+    s1.fields["un_number"] = FieldValue(value="不适用", source="template")
+    if not s1.fields.get("product_name_en"):
+        s1.fields["product_name_en"] = FieldValue(value="不适用", source="template")
     if product_name:
         s1.fields["product_name_cn"] = FieldValue(value=product_name, source="input")
     else:
         s1.fields.pop("product_name_cn", None)
 
-    # 混合物模式：清空S9（理化特性）— 由用户输入
-    gen.document.sections[9].fields.clear()
+    # 混合物模式：S9理化特性从组分数据聚合推导
+    s9 = gen.document.sections[9]
+    s9.fields.clear()
+    # 聚合理化特性
+    flash_points = []
+    boiling_points = []
+    densities = []
+    appearances = []
+    solubilities = []
+    for comp in components_data:
+        try:
+            fp = str(comp.get("flash_point", ""))
+            fp_match = re.search(r'-?[\d.]+', fp)
+            if fp_match:
+                flash_points.append(float(fp_match.group()))
+        except:
+            pass
+        try:
+            bp = str(comp.get("boiling_point", ""))
+            bp_match = re.search(r'-?[\d.]+', bp)
+            if bp_match:
+                boiling_points.append(float(bp_match.group()))
+        except:
+            pass
+        try:
+            d = str(comp.get("density", ""))
+            d_match = re.search(r'[\d.]+', d)
+            if d_match:
+                densities.append(float(d_match.group()))
+        except:
+            pass
+        app = str(comp.get("appearance", ""))
+        if app and "无可用" not in app:
+            appearances.append(app)
+        sol = str(comp.get("solubility_details", comp.get("solubility", "")))
+        if sol and "无可用" not in sol:
+            solubilities.append(sol)
 
-    gen.set_classification(mixture_classifications)
-    gen.set_components(components_data, is_mixture=True)
+    if flash_points:
+        # 混合物闪点取最低值（最危险）
+        min_fp = min(flash_points)
+        s9.fields["flash_point"] = FieldValue(value=f"{min_fp:.0f}（最低组分值）", source="aggregation")
+    if boiling_points:
+        bp_min = min(boiling_points)
+        bp_max = max(boiling_points)
+        if bp_min == bp_max:
+            s9.fields["boiling_point"] = FieldValue(value=f"{bp_min:.0f}", source="aggregation")
+        else:
+            s9.fields["boiling_point"] = FieldValue(value=f"{bp_min:.0f}~{bp_max:.0f}", source="aggregation")
+    if densities:
+        # 密度取加权平均（按浓度）
+        total_conc = sum(float(str(c.get("concentration", "0")).replace("%", "")) for c in components_data)
+        if total_conc > 0:
+            avg_density = sum(d * float(str(components_data[i].get("concentration", "0")).replace("%", "")) / total_conc
+                             for i, d in enumerate(densities))
+            s9.fields["density"] = FieldValue(value=f"{avg_density:.2f}（加权平均）", source="aggregation")
+    if appearances:
+        unique_apps = list(dict.fromkeys(appearances))[:3]  # 去重，最多3个
+        s9.fields["appearance"] = FieldValue(value="；".join(unique_apps), source="aggregation")
+    else:
+        # 推断外观：含有易燃液体组分 → 液体
+        s9.fields["appearance"] = FieldValue(value="液体（根据组分推断）", source="inference")
+    s9.fields["odor"] = FieldValue(value="有特殊气味（含有机溶剂组分）", source="inference")
+    # 熔点聚合
+    melting_points = []
+    for comp in components_data:
+        try:
+            mp = str(comp.get("melting_point", ""))
+            mp_match = re.search(r'-?[\d.]+', mp)
+            if mp_match:
+                melting_points.append(float(mp_match.group()))
+        except:
+            pass
+    if melting_points:
+        mp_min = min(melting_points)
+        mp_max = max(melting_points)
+        if mp_min == mp_max:
+            s9.fields["melting_point"] = FieldValue(value=f"{mp_min:.0f}", source="aggregation")
+        else:
+            s9.fields["melting_point"] = FieldValue(value=f"{mp_min:.0f}~{mp_max:.0f}", source="aggregation")
+    # 溶解性聚合
+    if solubilities:
+        unique_sol = list(dict.fromkeys(solubilities))[:3]
+        s9.fields["solubility"] = FieldValue(value="；".join(unique_sol), source="aggregation")
 
-    # 混合物模式：用分类计算的ATE覆盖S11毒理数据（不应显示第一组分LD50）
+    # 混合物S8接触限值：从组分聚合
+    s8 = gen.document.sections[8]
+    oel_combined = {}
+    for comp in components_data:
+        for key in ["pc_twa", "pc_stel", "acgih_tlv_twa", "acgih_tlv_stel"]:
+            val = comp.get(key)
+            if val and str(val) not in ("", "无可用数据", "不适用"):
+                name = comp.get("chemical_name_cn", comp.get("name", ""))
+                oel_combined[f"{key}[{name}]"] = val
+    if oel_combined:
+        s8.fields["oel_table"] = FieldValue(value=oel_combined, source="aggregation")
+
+    # 混合物S11毒理：从分类结果填充缺失字段
     s11 = gen.document.sections[11]
     for cls_item in mixture_classifications:
         hazard = cls_item.get("hazard", "")
@@ -1936,10 +2053,118 @@ def generate_mixture_sds(components_data: List[dict],
                     value=f"ATE = {ate_val:.1f} mg/L（混合物计算值）",
                     source="classification")
 
-    # 混合物模式：清空S14运输信息（不应使用第一组分的UN号）
+    # 混合物S11毒理：从组分GHS分类反填（皮肤/眼/致癌/生殖/STOT等）
+    # 扫描所有组分的ghs_classifications，聚合各危害类别
+    all_comp_ghs = []
+    for comp in components_data:
+        ghs_raw = comp.get("ghs_classifications", "")
+        if isinstance(ghs_raw, list):
+            all_comp_ghs.extend(ghs_raw)
+        elif ghs_raw:
+            all_comp_ghs.append(str(ghs_raw))
+    all_ghs_text = " ".join(str(g) for g in all_comp_ghs)
+
+    # 皮肤腐蚀/刺激
+    if any(kw in all_ghs_text for kw in ["皮肤腐蚀", "皮肤刺激"]):
+        skin_cats = [g for g in all_comp_ghs if "皮肤腐蚀" in str(g) or "皮肤刺激" in str(g)]
+        s11.fields["skin_corrosion_category"] = FieldValue(
+            value=", ".join(str(c) for c in set(skin_cats)), source="classification")
+    # 严重眼损伤/眼刺激
+    if any(kw in all_ghs_text for kw in ["眼损伤", "眼刺激"]):
+        eye_cats = [g for g in all_comp_ghs if "眼损伤" in str(g) or "眼刺激" in str(g)]
+        s11.fields["eye_damage_category"] = FieldValue(
+            value=", ".join(str(c) for c in set(eye_cats)), source="classification")
+    # 致突变性
+    if "致突变" in all_ghs_text:
+        s11.fields["mutagenicity"] = FieldValue(value="根据组分分类推断", source="classification")
+    # 致癌性 — 混合物分类中已有
+    for cls_item in mixture_classifications:
+        hazard = cls_item.get("hazard", "")
+        if "致癌" in hazard:
+            if "carcinogenicity_ghs" not in s11.fields or "待确认" in str(s11.fields.get("carcinogenicity_ghs", "")):
+                s11.fields["carcinogenicity_ghs"] = FieldValue(value=hazard, source="classification")
+    # 生殖毒性 — 混合物分类中已有
+    for cls_item in mixture_classifications:
+        hazard = cls_item.get("hazard", "")
+        if "生殖" in hazard:
+            if "reproductive_toxicity_category" not in s11.fields or "待确认" in str(s11.fields.get("reproductive_toxicity_category", "")):
+                s11.fields["reproductive_toxicity_category"] = FieldValue(value=hazard, source="classification")
+    # 特异性靶器官毒性
+    stot_se = [g for g in all_comp_ghs if "靶器官" in str(g) and "单次" in str(g)]
+    if stot_se:
+        s11.fields["stot_single_exposure"] = FieldValue(
+            value=", ".join(str(c) for c in set(stot_se)), source="classification")
+    stot_re = [g for g in all_comp_ghs if "靶器官" in str(g) and "反复" in str(g)]
+    if stot_re:
+        s11.fields["stot_repeated_exposure"] = FieldValue(
+            value=", ".join(str(c) for c in set(stot_re)), source="classification")
+    # 吸入危害
+    if any(kw in all_ghs_text for kw in ["吸入危害", "吸入危险"]):
+        s11.fields["aspiration_hazard"] = FieldValue(value="含低粘度有机液体组分，存在吸入危害", source="classification")
+    # 致敏
+    if "致敏" in all_ghs_text:
+        s11.fields.setdefault("skin_sensitization", FieldValue(value="根据组分分类推断", source="classification"))
+
+    # 混合物S14运输：推导运输类别、UN编号、包装类别和海洋污染物
     s14 = gen.document.sections[14]
-    for key in ["un_number"]:
-        s14.fields.pop(key, None)
+    # 推导运输类别
+    ghs_text_for_transport = " ".join(c.get("hazard", "") for c in mixture_classifications)
+    if "易燃液体" in ghs_text_for_transport:
+        s14.fields["transport_class"] = FieldValue(value="3", source="classification")
+        s14.fields["un_number"] = FieldValue(value="UN 1993", source="classification")
+        s14.fields["proper_shipping_name"] = FieldValue(value="易燃液体，未另作规定的", source="classification")
+    elif "易燃固体" in ghs_text_for_transport:
+        s14.fields["transport_class"] = FieldValue(value="4.1", source="classification")
+    elif "急性毒性" in ghs_text_for_transport:
+        s14.fields["transport_class"] = FieldValue(value="6.1", source="classification")
+    elif "腐蚀" in ghs_text_for_transport:
+        s14.fields["transport_class"] = FieldValue(value="8", source="classification")
+    # 从分类推导包装类别
+    has_cat1_or_2 = any("Cat 1" in c.get("hazard", "") or "Cat 2" in c.get("hazard", "") for c in mixture_classifications)
+    if "packing_group" not in s14.fields or "待确认" in str(s14.fields.get("packing_group", "")):
+        if has_cat1_or_2:
+            s14.fields["packing_group"] = FieldValue(value="II", source="classification")
+        else:
+            s14.fields["packing_group"] = FieldValue(value="III", source="classification")
+    # 海洋污染物：检查组分是否含水生毒性
+    has_aquatic = any("水生" in c.get("hazard", "") or "水生环境" in str(comp.get("ghs_classifications", ""))
+                      for c in mixture_classifications for comp in components_data)
+    if has_aquatic:
+        s14.fields["marine_pollutant"] = FieldValue(value="是（含对水生环境有害组分）", source="classification")
+    else:
+        s14.fields["marine_pollutant"] = FieldValue(value="否", source="classification")
+
+    # 混合物S10禁配物和分解产物：从组分聚合
+    s10 = gen.document.sections[10]
+    all_incompatibles = set()
+    all_decomp = set()
+    for comp in components_data:
+        inc = str(comp.get("incompatible_materials", ""))
+        if inc and "无可用" not in inc:
+            # 去除 [待确认] 标记后聚合
+            clean_inc = inc.replace(" [待确认]", "").replace("[待确认]", "")
+            for item in re.split(r'[、,，;；]', clean_inc):
+                item = item.strip()
+                if item:
+                    all_incompatibles.add(item)
+        dec = str(comp.get("hazardous_decomposition", ""))
+        if dec and "无可用" not in dec:
+            clean_dec = dec.replace(" [待确认]", "").replace("[待确认]", "")
+            all_decomp.add(clean_dec)
+    # 如果组分的禁配物都被过滤了，从组分类型推断
+    if not all_incompatibles:
+        # 检查是否含有易燃液体组分
+        has_flammable = any("易燃" in str(c.get("ghs_classifications", "")) for c in components_data)
+        if has_flammable:
+            all_incompatibles = {"强氧化剂", "强酸", "强碱", "热源"}
+    if all_incompatibles:
+        s10.fields["incompatible_materials"] = FieldValue(value="、".join(sorted(all_incompatibles)), source="aggregation")
+    # 分解产物：如果组分的分解产物为空，从分子式推断
+    if not all_decomp:
+        # 有机溶剂混合物默认分解产物
+        all_decomp.add("一氧化碳、二氧化碳")
+    if all_decomp:
+        s10.fields["hazardous_decomposition"] = FieldValue(value="；".join(sorted(all_decomp)) + "（推断值）", source="inference")
 
     content = gen.generate()
     return content, gen.get_review_flags()
