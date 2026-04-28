@@ -13,6 +13,7 @@
 """
 
 import json
+import re
 import sys
 import argparse
 from pathlib import Path
@@ -297,13 +298,70 @@ class SDSPipeline:
         try:
             from kb_manager import KnowledgeBaseManager
             mgr = KnowledgeBaseManager()
-            success = mgr.add(query, name_cn=name, use_llm=True)
+            # 如果query不是CAS号（不匹配 \d+-\d+-\d+），尝试翻译为英文名
+            cas_pattern = re.compile(r'^\d+-\d+-\d+$')
+            actual_query = query
+            if not cas_pattern.match(query):
+                # 中文名或英文名，PubChem可能不支持中文
+                translated = self._translate_to_english(query)
+                if translated:
+                    actual_query = translated
+                    print(f"  [INFO] 中文名 '{query}' → 英文名 '{translated}'")
+            success = mgr.add(actual_query, name_cn=name or query, use_llm=True)
             if success:
                 # 重新加载retriever的KB
                 self.retriever.kb = self.retriever._load_kb()
-                return mgr.data.get(query)
+                return mgr.data.get(actual_query)
         except Exception as e:
             print(f"  [WARN] kb_manager获取失败: {e}")
+        return None
+
+    def _translate_to_english(self, chinese_name: str) -> Optional[str]:
+        """将中文化学品名翻译为英文名（用于PubChem查询）"""
+        # 先检查是否已经是英文名
+        if re.match(r'^[a-zA-Z0-9\s\-_,.]+$', chinese_name):
+            return chinese_name
+        # 常见中文名→英文名映射
+        CN_EN_MAP = {
+            "丙酮": "acetone", "乙醇": "ethanol", "甲醇": "methanol",
+            "甲醛": "formaldehyde", "甲苯": "toluene", "二甲苯": "xylene",
+            "苯": "benzene", "苯酚": "phenol", "苯乙烯": "styrene",
+            "乙酸": "acetic acid", "盐酸": "hydrochloric acid",
+            "硫酸": "sulfuric acid", "硝酸": "nitric acid",
+            "氢氧化钠": "sodium hydroxide", "氢氧化钾": "potassium hydroxide",
+            "氨": "ammonia", "铜": "copper", "铝": "aluminum",
+            "铁": "iron", "锌": "zinc", "铅": "lead",
+            "汞": "mercury", "银": "silver", "金": "gold",
+            "糠醛": "furfural", "三氯乙烯": "trichloroethylene",
+            "丙烯腈": "acrylonitrile", "二甲基亚砜": "dimethyl sulfoxide",
+            "四氢呋喃": "tetrahydrofuran", "N-甲基吡咯烷酮": "N-methylpyrrolidone",
+            "正己烷": "n-hexane", "环己烷": "cyclohexane",
+            "二氯甲烷": "dichloromethane", "氯仿": "chloroform",
+            "乙醚": "diethyl ether", "异丙醇": "isopropanol",
+            "正丁醇": "n-butanol", "乙二醇": "ethylene glycol",
+            "丙三醇": "glycerol", "乙酸乙酯": "ethyl acetate",
+            "乙酸正丁酯": "n-butyl acetate", "乙二醇丁醚": "ethylene glycol monobutyl ether",
+            "正己醇": "1-hexanol", "环己酮": "cyclohexanone",
+            "甲基叔丁基醚": "methyl tert-butyl ether",
+            "过氧化氢": "hydrogen peroxide", "臭氧": "ozone",
+            "氩": "argon", "氩气": "argon", "氮气": "nitrogen",
+            "氧气": "oxygen", "二氧化碳": "carbon dioxide",
+            "一氧化碳": "carbon monoxide",
+        }
+        if chinese_name in CN_EN_MAP:
+            return CN_EN_MAP[chinese_name]
+        # 尝试LLM翻译
+        try:
+            sys_path = str(Path(__file__).resolve().parent)
+            if sys_path not in sys.path:
+                sys.path.insert(0, sys_path)
+            from msds_llm_client import llm_infer
+            prompt = f"请将以下化学品中文名称翻译为最常见的英文名称，只返回英文名，不要其他内容：{chinese_name}"
+            result = llm_infer(prompt, "")
+            if result and len(result.strip()) < 50:
+                return result.strip()
+        except:
+            pass
         return None
 
     def _parse_components(self, components_str: str) -> List[tuple]:

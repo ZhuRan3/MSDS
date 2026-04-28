@@ -80,7 +80,7 @@ class PubChemFetcher:
         except:
             pass
 
-        # CAS查询失败，尝试名称查询
+        # CAS查询失败，尝试英文名查询
         url = f"{PUBCHEM_BASE}/compound/name/{cas_or_name}/cids/JSON"
         try:
             resp = self.session.get(url, timeout=30)
@@ -88,6 +88,39 @@ class PubChemFetcher:
                 cids = resp.json().get("IdentifierList", {}).get("CID", [])
                 if cids:
                     return cids[0]
+        except:
+            pass
+
+        # 英文名也失败，尝试通过synonym搜索（支持中文名）
+        cid = self._search_synonym(cas_or_name)
+        if cid:
+            return cid
+
+        return None
+
+    def _search_synonym(self, name: str) -> Optional[int]:
+        """通过PubChem synonym搜索获取CID（支持中文名）"""
+        import urllib.parse
+        encoded = urllib.parse.quote(name, safe='')
+        url = f"{PUBCHEM_BASE}/compound/name/{encoded}/cids/JSON"
+        try:
+            resp = self.session.get(url, timeout=30)
+            if resp.status_code == 200:
+                cids = resp.json().get("IdentifierList", {}).get("CID", [])
+                if cids:
+                    return cids[0]
+        except:
+            pass
+
+        # 最后尝试：从PubChem REST API搜索
+        search_url = f"https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/name/{encoded}/JSON"
+        try:
+            resp = self.session.get(search_url, timeout=30)
+            if resp.status_code == 200:
+                data = resp.json()
+                compounds = data.get("PC_Compounds", [])
+                if compounds:
+                    return compounds[0].get("id", {}).get("id", {}).get("cid")
         except:
             pass
         return None
