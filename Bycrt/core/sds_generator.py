@@ -845,14 +845,53 @@ class SDSGenerator:
                     for p in picts
                 )
 
+        # 紧急概述：基于GHS分类生成简要危害描述
+        emergency_overview = self._build_emergency_overview(ghs_text, all_h_codes if 'all_h_codes' in dir() else [])
+
         return (
             f"# 第二部分：危险性概述\n\n"
+            f"**紧急概述**: {emergency_overview}\n\n"
             f"**GHS分类**:\n{ghs_text}\n\n"
             f"**信号词**: {signal}\n\n"
             f"**象形图**: {pict_text if pict_text else '无适用象形图 [待确认]'}\n\n"
             f"**危险性说明**:\n{h_text if h_text else '无可用数据 [待确认]'}\n\n"
             f"**防范说明**:\n\n{p_text if p_text else '无可用数据 [待确认]'}"
         )
+
+    def _build_emergency_overview(self, ghs_text: str, h_codes: list = None) -> str:
+        """基于GHS分类生成紧急概述段落"""
+        parts = []
+        # 物理化学危险
+        if "易燃液体" in ghs_text or "易燃固体" in ghs_text:
+            parts.append("本品含易燃组分，蒸气与空气可形成爆炸性混合物")
+        elif "易燃" in ghs_text:
+            parts.append("本品具易燃性")
+        if "氧化性" in ghs_text:
+            parts.append("可加剧燃烧")
+        if "加压气体" in ghs_text or "气体" in ghs_text:
+            parts.append("含加压气体组分，受热容器可能破裂")
+        # 健康危害
+        health = []
+        if "急性毒性" in ghs_text:
+            health.append("具急性毒性")
+        if "皮肤腐蚀" in ghs_text:
+            health.append("可引起皮肤严重灼伤")
+        if "腐蚀" in ghs_text and "皮肤腐蚀" not in ghs_text:
+            health.append("具腐蚀性")
+        if "致癌" in ghs_text:
+            health.append("怀疑或确认致癌")
+        if "生殖" in ghs_text:
+            health.append("可能损害生育力或胎儿")
+        if "靶器官" in ghs_text:
+            health.append("可造成特异性靶器官损害")
+        if health:
+            parts.append("健康危害：" + "、".join(health))
+        # 环境危害
+        if "水生" in ghs_text or "环境" in ghs_text:
+            parts.append("对水生环境有害")
+        if not parts:
+            return "请参阅下述详细分类信息。"
+        return "。" .join(parts) + "。具体分类详见下文。"
 
     def generate_section_3(self) -> str:
         """第三部分：成分/组成信息"""
@@ -1154,6 +1193,22 @@ class SDSGenerator:
         decomp_line = ""
         if decomp and "待确认" not in decomp:
             decomp_line = f"\n\n**燃烧/分解产物**: {decomp}"
+        # 补充含卤素有机物的光气警告
+        if not decomp_line:
+            inferred = self._infer_decomposition_products()
+            if inferred:
+                decomp_line = f"\n\n**燃烧/分解产物**: {inferred}（推断值）"
+        # 检查是否含卤素组分
+        s5_comps = getattr(self, '_components_data', [])
+        s5_cas_list = [str(c.get("cas_number", c.get("cas", ""))) for c in s5_comps]
+        s5_names = [str(c.get("chemical_name_cn", c.get("name", ""))) for c in s5_comps]
+        s5_has_chlorinated = any(cas in s5_cas_list for cas in ["75-09-2", "67-66-3", "71-55-6", "127-18-4"]) or \
+                             any("二氯" in n or "三氯" in n or "氯仿" in n for n in s5_names)
+        kb5 = getattr(self, '_kb_data', {})
+        formula = str(kb5.get("molecular_formula", ""))
+        if s5_has_chlorinated or "Cl" in formula:
+            if "光气" not in decomp_line and "氯化氢" not in decomp_line:
+                decomp_line += "。含氯有机物不完全燃烧可产生光气（碳酰氯）和氯化氢等剧毒气体"
 
         return (
             f"# 第五部分：消防措施\n\n"
@@ -1436,13 +1491,49 @@ class SDSGenerator:
         if self._has_classification("自反应") or self._has_classification("有机过氧化物"):
             polymerization = "可能发生危险的聚合反应。"
 
+        # 危险反应：含卤素有机物的特殊警告
+        hazard_reaction = ""
+        comps = getattr(self, '_components_data', [])
+        all_ghs_s10 = ""
+        comp_names = []
+        comp_cas = []
+        for comp in comps:
+            cg = comp.get("ghs_classifications", "")
+            if isinstance(cg, list):
+                all_ghs_s10 += " " + " ".join(str(g) for g in cg)
+            elif cg:
+                all_ghs_s10 += " " + str(cg)
+            comp_names.append(str(comp.get("chemical_name_cn", comp.get("name", ""))))
+            comp_cas.append(str(comp.get("cas_number", comp.get("cas", ""))))
+
+        kb10 = getattr(self, '_kb_data', {})
+        formula10 = str(kb10.get("molecular_formula", ""))
+        # 检查是否含氯组分（通过CAS号或名称判断）
+        has_chlorinated = any(cas in comp_cas for cas in ["75-09-2", "67-66-3", "71-55-6", "127-18-4"]) or \
+                          any("二氯" in n or "三氯" in n or "氯仿" in n or "氯乙烯" in n for n in comp_names) or \
+                          "Cl" in formula10
+        reaction_notes = []
+        if has_chlorinated:
+            reaction_notes.append("含卤素有机物与活泼金属（铝、镁、锌）反应可产生有毒气体。含氯有机物在紫外线或高温下可分解产生光气（碳酰氯），应避免阳光直射。")
+        if "易燃" in all_ghs_s10 and ("氧化" in all_ghs_s10 or "过氧化" in all_ghs_s10):
+            reaction_notes.append("与强氧化剂剧烈反应，有火灾和爆炸危险。")
+        if reaction_notes:
+            hazard_reaction = "\n\n**危险反应**: " + " ".join(reaction_notes)
+
+        # 对分解产物补充光气警告
+        decomp_warning = ""
+        if has_chlorinated:
+            if "光气" not in decomp and "氯化氢" not in decomp:
+                decomp_warning = "。含氯有机物不完全燃烧可产生光气（碳酰氯）和氯化氢等剧毒气体"
+
         return (
             f"# 第十部分：稳定性和反应性\n\n"
             f"**稳定性**: {stability}\n\n"
             f"**应避免的条件**: {conditions}\n\n"
             f"**禁配物**: {incompatibles}\n\n"
-            f"**危险分解产物**: {decomp}\n\n"
+            f"**危险分解产物**: {decomp}{decomp_warning}\n\n"
             f"**聚合危害**: {polymerization}"
+            f"{hazard_reaction}"
         )
 
     # 毒理学症状知识库：基于GHS分类自动推断主要症状
@@ -1599,10 +1690,10 @@ class SDSGenerator:
             "note": "中和处理应缓慢进行，避免剧烈放热。操作人员应穿戴防护装备。",
         },
         "toxic": {
-            "method": "用焚烧法或化学法处理。含卤素有机物焚烧需配备高效洗涤器。不得与一般废物混合。委托有资质的危险废物处理单位处理。",
-            "container": "废弃容器按危险废物管理，交由有资质单位处理。不得作为普通废金属回收。容器上应保持危险废物标签。",
-            "regulation": "按具体成分确定危险废物类别。须执行《危险废物转移联单管理办法》。",
-            "note": "处置过程中应防止有毒物质扩散。操作人员必须穿戴适当的防护装备。",
+            "method": "用焚烧法或化学法处理。含卤素有机物焚烧温度不低于1200°C，停留时间不小于2秒，确保完全分解防止产生二噁英。焚烧需配备高效洗涤器和除尘装置。不得与一般废物混合。委托有资质的危险废物处理单位处理。",
+            "container": "废弃容器按危险废物管理，交由有资质单位处理。不得作为普通废金属回收。容器上应保持危险废物标签。空容器可能残留有害蒸气，不得切割、焊接。",
+            "regulation": "按具体成分确定危险废物类别（HW06有机溶剂废物、HW42废有机溶剂，含卤素废物属HW39）。须执行《危险废物转移联单管理办法》。",
+            "note": "处置过程中应防止有毒物质扩散。操作人员必须穿戴适当的防护装备。严禁直接排入下水道。",
         },
         "heavy_metal": {
             "method": "不得焚烧（会造成重金属大气污染）。应进行稳定化/固化处理后安全填埋。含重金属废液应先沉淀处理，上清液达标后排放，沉淀物按危险废物处置。",
