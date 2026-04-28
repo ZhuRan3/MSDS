@@ -2,11 +2,11 @@
 name: msds-generate
 description: Generate professional MSDS for chemicals (pure substances or mixtures). Skill+Claude+RAG architecture. Supports both single chemicals and mixtures with proper GHS classification.
 type: skill
-version: 4.0.0
+version: 5.0.0
 trigger: /msds-generate
 ---
 
-# MSDS Generation Skill (Skill+Claude+RAG架构)
+# MSDS Generation Skill (七层Pipeline架构)
 
 ## 支持类型
 - **纯净物**: 单组分化学品，通过CAS号或化学名查询
@@ -14,18 +14,42 @@ trigger: /msds-generate
 
 ## 核心架构
 ```
-用户 → Claude Code → 类型判断 → 纯净物: RAG检索 | 混合物: 组分分析 → 生成MSDS → Review审查
+L1 数据源(db/) → L2 实体标准化 → L3 证据检索融合 → L4 分类引擎 → L5 SDS生成 → L6 自动审查 → L7 输出归档
 ```
+
+## 快速入口（推荐）
+
+### 纯净物
+```bash
+python core/sds_pipeline_v2.py --query "乙醇"
+python core/sds_pipeline_v2.py --query "64-17-5" --name "乙醇" --output output/pure/MSDS_ethanol.md
+```
+
+### 混合物
+```bash
+python core/sds_pipeline_v2.py --mixture "乙醇:64-17-5:30,甲醇:67-56-1:30,丙酮:67-64-1:15,丙三醇:56-81-5:25"
+```
+
+一键完成七层全流程，包含自动审查和来源追溯。
 
 ## 核心原则
 1. **纯净物**: 知识库优先，相关度<80%时先建立知识库
 2. **混合物**: 组分数据计算，不依赖知识库
 3. **不瞎编**: 估算值需注明"估算"，鼓励实验验证
 4. **数据来源**: 优先PubChem/知识库，LLM推断补全
+5. **来源追溯**: 每个字段标注来源和置信度
 
 ---
 
 # 纯净物 MSDS 生成流程
+
+## Phase 0: 一键Pipeline（推荐）
+
+```bash
+python core/sds_pipeline_v2.py --query "<CAS号或化学名>" --name "<中文名>"
+```
+
+自动完成：证据检索→分类→SDS生成→审查→输出。以下为手动fallback流程。
 
 ## Phase 1: RAG检索
 
@@ -49,6 +73,13 @@ python core/kb_manager.py --add "<CAS号>" --name "<中文名>"
 # 混合物 MSDS 生成流程
 
 ## Phase 1: 收集组分数据
+
+### 一键Pipeline（推荐）
+```bash
+python core/sds_pipeline_v2.py --mixture "名称:CAS:浓度,名称:CAS:浓度"
+```
+
+### 手动流程
 
 对于混合物，用户需提供：
 - 各组分名称（中文/英文）

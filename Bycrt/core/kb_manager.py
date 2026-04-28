@@ -155,6 +155,157 @@ class PubChemFetcher:
             pass
         return {}
 
+    # ----------------------------------------------------------
+    # PUG View 详细数据获取
+    # ----------------------------------------------------------
+
+    def _get_pug_view(self, cid: int, heading: str) -> Dict:
+        """获取PUG View指定heading的完整数据"""
+        base = PUBCHEM_BASE.replace('/rest/pug', '/rest/pug_view')
+        url = f"{base}/data/compound/{cid}/JSON"
+        params = {"heading": heading}
+        try:
+            resp = self.session.get(url, params=params, timeout=30)
+            if resp.status_code == 200:
+                return resp.json()
+        except:
+            pass
+        return {}
+
+    def _extract_strings(self, data: Dict, target_heading: str) -> List[str]:
+        """从PUG View JSON递归提取指定heading的所有String值"""
+        results = []
+        sections = data.get("Record", {}).get("Section", [])
+        self._search_sections(sections, target_heading, results)
+        return results
+
+    def _search_sections(self, sections, target, results):
+        """递归搜索PUG View Section"""
+        if not isinstance(sections, list):
+            return
+        for section in sections:
+            heading = section.get("TOCHeading", "")
+            if heading.lower().replace(" ", "") == target.lower().replace(" ", ""):
+                for info in section.get("Information", []):
+                    val = info.get("Value", {})
+                    # StringWithMarkup
+                    for swm in val.get("StringWithMarkup", []):
+                        s = swm.get("String", "").strip()
+                        if s:
+                            results.append(s)
+                    # 单独的String
+                    if not results and val.get("String"):
+                        results.append(val["String"])
+            # 递归子section
+            self._search_sections(section.get("Section", []), target, results)
+
+    def get_experimental_properties(self, cid: int) -> Dict:
+        """从PUG View获取理化性质（外观、气味、蒸气压、自燃温度、爆炸极限等）"""
+        result = {}
+        data = self._get_pug_view(cid, "Experimental+Properties")
+        if not data:
+            return result
+
+        mappings = {
+            "Physical Description": "appearance",
+            "PhysicalDescriptions": "appearance",
+            "Odor": "odor",
+            "OdorThreshold": "odor_threshold",
+            "Vapor Pressure": "vapor_pressure",
+            "Autoignition Temperature": "autoignition_temp",
+            "Lower Explosive Limit": "explosion_limits_lel",
+            "Upper Explosive Limit": "explosion_limits_uel",
+            "Explosive Limits and": "explosion_limits",
+            "LogP": "partition_coefficient_n-octanol_water",
+            "Log Kow": "partition_coefficient_n-octanol_water",
+        }
+
+        for heading, field in mappings.items():
+            strings = self._extract_strings(data, heading)
+            if strings:
+                result[field] = strings[0]
+
+        # 合并爆炸极限上下限
+        lel = result.pop("explosion_limits_lel", "")
+        uel = result.pop("explosion_limits_uel", "")
+        if lel or uel:
+            parts = []
+            if lel:
+                parts.append(f"下限: {lel}")
+            if uel:
+                parts.append(f"上限: {uel}")
+            result["explosion_limits"] = "; ".join(parts)
+        elif "explosion_limits" not in result:
+            pass  # 已由 Exploitve Limits and heading 捕获
+
+        return result
+
+    def get_toxicity_data(self, cid: int) -> Dict:
+        """从PUG View获取毒理学数据"""
+        result = {}
+        data = self._get_pug_view(cid, "Toxicity")
+        if not data:
+            return result
+
+        # LD50/LC50
+        for heading in ["Non-Human Toxicity Values"]:
+            vals = self._extract_strings(data, heading)
+            for v in vals:
+                v_lower = v.lower()
+                if "ld50" in v_lower and "oral" in v_lower and "ld50_oral" not in result:
+                    result["ld50_oral"] = v
+                elif "ld50" in v_lower and "dermal" in v_lower and "ld50_dermal" not in result:
+                    result["ld50_dermal"] = v
+                elif "lc50" in v_lower and "inhalation" in v_lower and "lc50_inhalation" not in result:
+                    result["lc50_inhalation"] = v
+
+        # 致癌性
+        for heading in ["Evidence for Carcinogenicity", "Carcinogen Classification"]:
+            vals = self._extract_strings(data, heading)
+            if vals and "carcinogenicity_ghs" not in result:
+                result["carcinogenicity_ghs"] = vals[0]
+
+        # 靶器官
+        for heading in ["Target Organs", "Target Organ"]:
+            vals = self._extract_strings(data, heading)
+            if vals and "stot_target_organs" not in result:
+                result["stot_target_organs"] = vals[0]
+
+        return result
+
+    def get_ecotoxicity_data(self, cid: int) -> Dict:
+        """从PUG View获取生态毒理数据"""
+        result = {}
+        data = self._get_pug_view(cid, "Ecological+Information")
+        if not data:
+            return result
+
+        for heading in ["Ecotoxicity Values", "Ecotoxicity Excerpts"]:
+            vals = self._extract_strings(data, heading)
+            for v in vals:
+                v_lower = v.lower()
+                if "lc50" in v_lower and ("fish" in v_lower or "oncorhynchus" in v_lower
+                                           or "pimephales" in v_lower or "lepomis" in v_lower):
+                    result.setdefault("ecotoxicity_lc50_fish", v)
+                elif "ec50" in v_lower and ("daphnia" in v_lower or "daphnia" in v_lower):
+                    result.setdefault("ecotoxicity_ec50_daphnia", v)
+                elif ("ec50" in v_lower or "ebc50" in v_lower) and "algae" in v_lower:
+                    result.setdefault("ecotoxicity_ec50_algae", v)
+
+        # 生物富集
+        for heading in ["Environmental Bioconcentration", "Bioconcentration"]:
+            vals = self._extract_strings(data, heading)
+            if vals and "bcf_bioconcentration" not in result:
+                result["bcf_bioconcentration"] = vals[0]
+
+        # 降解性
+        for heading in ["Environmental Biodegradation", "Biodegradation"]:
+            vals = self._extract_strings(data, heading)
+            if vals and "biodegradability" not in result:
+                result["biodegradability"] = vals[0]
+
+        return result
+
 
 # ============================================================
 # LLM数据推断（当API数据不足时）
@@ -323,7 +474,28 @@ class KnowledgeBaseManager:
 
         # 使用LLM推断详细数据
         if use_llm:
-            print(f"  [INFO] 使用LLM推断详细数据...")
+            print(f"  [INFO] 从PubChem PUG View获取补充数据...")
+            cid = pubchem_data.get('cid')
+            if cid:
+                # 理化性质补充
+                physchem = self.fetcher.get_experimental_properties(cid)
+                for key, val in physchem.items():
+                    if val and not chem.get(key):
+                        chem[key] = val
+                # 毒理学数据补充
+                tox = self.fetcher.get_toxicity_data(cid)
+                for key, val in tox.items():
+                    if val and not chem.get(key):
+                        chem[key] = val
+                # 生态毒理数据补充
+                eco = self.fetcher.get_ecotoxicity_data(cid)
+                for key, val in eco.items():
+                    if val and not chem.get(key):
+                        chem[key] = val
+                filled = len(physchem) + len(tox) + len(eco)
+                print(f"  [OK] PUG View补充 {filled} 个字段")
+
+            print(f"  [INFO] 使用LLM推断剩余缺失数据...")
             llm_data = infer_with_llm(
                 cas,
                 chem['molecular_formula'],

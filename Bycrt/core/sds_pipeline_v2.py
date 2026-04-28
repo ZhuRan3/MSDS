@@ -68,7 +68,8 @@ class SDSPipeline:
         self.MSDSReviewer = MSDSReviewer
 
     def generate_pure(self, query: str, product_name: str = "",
-                      output_path: str = "", use_llm: bool = False) -> PipelineResult:
+                      output_path: str = "", use_llm: bool = False,
+                      pdf: bool = False) -> PipelineResult:
         """
         纯净物SDS生成全流程
 
@@ -131,7 +132,7 @@ class SDSPipeline:
             safe_name = (product_name or pool.name_cn or query).replace(" ", "_")
             output_path = str(OUTPUT_DIR / "pure" / f"MSDS_{safe_name}.md")
 
-        self._save_output(output_path, content)
+        self._save_output(output_path, content, generate_pdf=pdf)
 
         # 来源摘要
         print(f"\n[L7] 输出完成: {output_path}")
@@ -152,7 +153,8 @@ class SDSPipeline:
         )
 
     def generate_mixture(self, components_str: str, product_name: str = "",
-                         output_path: str = "", use_llm: bool = False) -> PipelineResult:
+                         output_path: str = "", use_llm: bool = False,
+                         pdf: bool = False) -> PipelineResult:
         """
         混合物SDS生成全流程
 
@@ -237,7 +239,7 @@ class SDSPipeline:
         rev_date = _dt.now().strftime("%Y-%m-%d")
         content, review_flags = self.generate_mixture_sds(
             components_data, classifications,
-            product_name or "混合物",
+            product_name,
             use_llm=use_llm, version="1.0", revision_date=rev_date,
         )
 
@@ -248,10 +250,10 @@ class SDSPipeline:
 
         # 保存
         if not output_path:
-            safe_name = (product_name or "mixture").replace(" ", "_")
+            safe_name = (product_name or "mixture_" + datetime.now().strftime("%Y%m%d%H%M%S")).replace(" ", "_")
             output_path = str(OUTPUT_DIR / "mixture" / f"MSDS_{safe_name}.md")
 
-        self._save_output(output_path, content)
+        self._save_output(output_path, content, generate_pdf=pdf)
 
         print(f"\n[L7] 输出完成: {output_path}")
         print(f"  审查状态: {review_report.get('status', 'N/A')}")
@@ -322,13 +324,22 @@ class SDSPipeline:
                 result.append((cas, cas, conc))
         return result
 
-    def _save_output(self, path: str, content: str):
-        """保存输出文件"""
+    def _save_output(self, path: str, content: str, generate_pdf: bool = False):
+        """保存输出文件（MD + 可选 PDF）"""
         p = Path(path)
         p.parent.mkdir(parents=True, exist_ok=True)
         with open(p, "w", encoding="utf-8") as f:
             f.write(content)
         print(f"  已保存: {path}")
+
+        if generate_pdf:
+            try:
+                from pdf_generator import generate_pdf
+                pdf_path = str(p.with_suffix('.pdf'))
+                generate_pdf(content, pdf_path, title=p.stem)
+                print(f"  已保存PDF: {pdf_path}")
+            except Exception as e:
+                print(f"  [WARN] PDF生成失败: {e}")
 
 
 # ============================================================
@@ -353,6 +364,7 @@ def main():
     parser.add_argument("--output", type=str, default="", help="输出文件路径")
     parser.add_argument("--json", action="store_true", help="以JSON格式输出元数据")
     parser.add_argument("--use-llm", action="store_true", help="使用LLM增强文本生成")
+    parser.add_argument("--pdf", action="store_true", help="同时输出PDF格式")
 
     args = parser.parse_args()
 
@@ -368,6 +380,7 @@ def main():
             product_name=args.name,
             output_path=args.output,
             use_llm=args.use_llm,
+            pdf=args.pdf,
         )
     elif args.mixture:
         result = pipeline.generate_mixture(
@@ -375,6 +388,7 @@ def main():
             product_name=args.name,
             output_path=args.output,
             use_llm=args.use_llm,
+            pdf=args.pdf,
         )
     else:
         parser.print_help()

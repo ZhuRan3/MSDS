@@ -415,8 +415,17 @@ class SDSGenerator:
             if sig:
                 signal_words.add(sig)
 
-            # 象形图
-            picts = cls.get("pictograms", self.templates.hazard_to_pictograms(hazard))
+            # 象形图（优先用分类结果的，否则从映射表查找，含中英文路由名兜底）
+            picts = cls.get("pictograms") or []
+            if not picts or picts == ["NONE"]:
+                picts = self.templates.hazard_to_pictograms(hazard)
+            if not picts:
+                # mixture_calculator 用英文路由名(oral/dermal/inhalation)，映射表用中文(经口/经皮/吸入)
+                cn_route = hazard
+                for en, cn in [("oral", "经口"), ("dermal", "经皮"), ("inhalation", "吸入")]:
+                    cn_route = cn_route.replace(en, cn)
+                if cn_route != hazard:
+                    picts = self.templates.hazard_to_pictograms(cn_route)
             for p in picts:
                 if p not in all_pictograms:
                     all_pictograms.append(p)
@@ -500,6 +509,111 @@ class SDSGenerator:
         self.document.metadata["revision_log"] = revision_log or []
 
     # ----------------------------------------------------------
+    # 混合物危害聚合器（无需LLM，纯规则驱动）
+    # ----------------------------------------------------------
+
+    class MixtureHazardAggregator:
+        """从所有组分中聚合危害信息，用于生成化学特异性内容"""
+
+        TARGET_ORGAN_FIRST_AID = {
+            "血液": {"ingestion": "注意溶血风险。监测血液参数（红细胞计数、血红蛋白）。",
+                     "skin": "注意皮肤吸收导致的血液毒性风险。"},
+            "中枢神经": {"inhalation": "可能导致头晕、嗜睡。保持患者清醒。"},
+            "神经": {"inhalation": "可能导致神经损伤。长期暴露需监测神经系统功能。"},
+            "肝": {"ingestion": "监测肝功能指标（ALT、AST）。"},
+            "肾": {"ingestion": "监测肾功能指标。保持充足液体摄入。"},
+            "呼吸": {"inhalation": "可能引起呼吸道刺激或肺水肿。延迟观察至少48小时。"},
+        }
+
+        TARGET_ORGAN_SPILL = {
+            "血液": "泄漏物可能通过皮肤吸收导致血液毒性。加强皮肤防护。",
+            "中枢神经": "蒸气可引起嗜睡和眩晕。确保充分通风。",
+        }
+
+        DECOMPOSITION_HAZARDS = {
+            "氰": "燃烧可能产生剧毒氰化氢(HCN)气体。",
+            "氯": "燃烧可能产生有毒氯气。",
+            "氮": "燃烧可能产生有毒氮氧化物。",
+            "硫": "燃烧可能产生有毒二氧化硫。",
+        }
+
+        def __init__(self, components_data: List[dict]):
+            self.components = components_data
+            self._all_target_organs = set()
+            self._all_hazard_keywords = set()
+            self._aggregate()
+
+        def _aggregate(self):
+            for comp in self.components:
+                ghs_list = comp.get("ghs_classifications", [])
+                if isinstance(ghs_list, list):
+                    for ghs in ghs_list:
+                        self._all_hazard_keywords.add(str(ghs))
+                        if "靶器官" in str(ghs):
+                            organ = self._extract_target_organ(str(ghs))
+                            if organ:
+                                self._all_target_organs.add(organ)
+
+        def _extract_target_organ(self, ghs_str: str) -> str:
+            match = re.search(r'[（(]\s*([^)）]+)\s*[)）]', ghs_str)
+            if match:
+                organ_text = match.group(1)
+                for key in self.TARGET_ORGAN_FIRST_AID:
+                    if key in organ_text:
+                        return key
+            return ""
+
+        def get_first_aid_notes(self) -> Dict[str, List[str]]:
+            result = {"inhalation": [], "skin": [], "eye": [], "ingestion": []}
+            # 聚合各组分的KB急救注释
+            for comp in self.components:
+                notes = comp.get("first_aid_notes", {})
+                if isinstance(notes, dict):
+                    name = comp.get("chemical_name_cn", comp.get("name", ""))
+                    for route in result:
+                        note = notes.get(route, "")
+                        if note:
+                            result[route].append(f"[{name}] {note}")
+            # 基于靶器官添加特异性建议
+            for organ in self._all_target_organs:
+                advice = self.TARGET_ORGAN_FIRST_AID.get(organ, {})
+                for route, text in advice.items():
+                    if text and text not in result.get(route, []):
+                        result[route].append(text)
+            return result
+
+        def get_firefighting_notes(self) -> List[str]:
+            notes = []
+            for comp in self.components:
+                ff = comp.get("firefighting_notes", "")
+                if ff:
+                    name = comp.get("chemical_name_cn", comp.get("name", ""))
+                    notes.append(f"[{name}] {ff}")
+            # 分解产物危害
+            for comp in self.components:
+                decomp = str(comp.get("hazardous_decomposition", ""))
+                for key, warning in self.DECOMPOSITION_HAZARDS.items():
+                    if key in decomp and warning not in notes:
+                        notes.append(warning)
+            return notes
+
+        def get_spill_notes(self) -> List[str]:
+            notes = []
+            for organ in self._all_target_organs:
+                advice = self.TARGET_ORGAN_SPILL.get(organ, "")
+                if advice:
+                    notes.append(advice)
+            return notes
+
+        def get_target_organs_summary(self) -> str:
+            if not self._all_target_organs:
+                return ""
+            return "、".join(sorted(self._all_target_organs))
+
+        def get_all_hazard_keywords(self) -> set:
+            return self._all_hazard_keywords
+
+    # ----------------------------------------------------------
     # 模板化生成各章节
     # ----------------------------------------------------------
 
@@ -522,6 +636,22 @@ class SDSGenerator:
         if "[待确认]" in default:
             return default
         return f"{default} [待确认]"
+
+    def _strip_unit(self, value: str) -> str:
+        """去除KB值中已有的单位，防止模板追加时重复"""
+        # 提取HTML注释
+        comment = ''
+        comment_match = re.search(r'(<!--.*?-->)\s*$', str(value))
+        if comment_match:
+            comment = ' ' + comment_match.group(1)
+        main_val = re.sub(r'\s*<!--.*?-->\s*$', '', str(value))
+        # 去除温度单位（可能在值中间，如"-20℃（闭杯）"）
+        main_val = re.sub(r'[°℃][Cc]?', '', main_val)
+        # 去除压力/密度单位
+        main_val = re.sub(r'\s*kPa\b', '', main_val, flags=re.IGNORECASE)
+        main_val = re.sub(r'\s*g/cm[³3]\b', '', main_val)
+        main_val = re.sub(r'\s*g/mL\b', '', main_val)
+        return main_val.strip() + comment
 
     def _has_classification(self, keyword: str) -> bool:
         """检查分类中是否包含某关键词"""
@@ -693,7 +823,7 @@ class SDSGenerator:
         return f"# 第三部分：成分/组成信息\n\n**类型**: {chem_type}\n\n{self._val(3, 'components', '无可用数据 [待确认]')}"
 
     def generate_section_4(self) -> str:
-        """第四部分：急救措施（基于分类规则 + KB特异性注释）"""
+        """第四部分：急救措施（基于分类规则 + KB/组分聚合特异性注释）"""
         is_corrosive = self._has_classification("皮肤腐蚀") or self._has_classification("腐蚀")
         is_toxic = self._has_classification("急性毒性")
 
@@ -705,23 +835,41 @@ class SDSGenerator:
         ingestion = "漱口。不要催吐。给少量水稀释。立即就医。" if is_corrosive or is_toxic else \
                     "漱口。给水稀释。如感觉不适，就医。"
 
-        # 注入KB特异性注释
-        for route, base_text in [("inhalation", inhalation), ("skin", skin),
-                                  ("eye", eye), ("ingestion", ingestion)]:
-            note = self._val(4, f'notes_{route}', "")
-            if note and "待确认" not in note:
-                # 找到对应变量并追加注释
-                if route == "inhalation":
-                    inhalation = f"{inhalation}\n注意：{note}"
-                elif route == "skin":
-                    skin = f"{skin}\n注意：{note}"
-                elif route == "eye":
-                    eye = f"{eye}\n注意：{note}"
-                elif route == "ingestion":
-                    ingestion = f"{ingestion}\n注意：{note}"
+        # 混合物模式：聚合所有组分的特异性注释和靶器官建议
+        mixture_notes = {"inhalation": [], "skin": [], "eye": [], "ingestion": []}
+        if getattr(self, '_is_mixture', False):
+            agg = getattr(self, '_mixture_aggregator', None)
+            if agg:
+                mixture_notes = agg.get_first_aid_notes()
+
+        # 注入KB特异性注释（纯物质模式用单组分KB，混合物模式用聚合结果）
+        route_map = {"inhalation": inhalation, "skin": skin, "eye": eye, "ingestion": ingestion}
+        for route in route_map:
+            # 先尝试组分聚合注释
+            extra_lines = []
+            agg_notes = mixture_notes.get(route, [])
+            if agg_notes:
+                extra_lines.extend(agg_notes)
+            # 再尝试单组分KB注释（兜底）
+            if not agg_notes:
+                note = self._val(4, f'notes_{route}', "")
+                if note and "待确认" not in note:
+                    extra_lines.append(note)
+            if extra_lines:
+                route_map[route] = route_map[route] + "\n\n" + "\n".join(f"- {n}" for n in extra_lines)
+
+        inhalation, skin, eye, ingestion = (route_map[r] for r in ["inhalation", "skin", "eye", "ingestion"])
 
         rescuer = "救援人员应佩戴适当的防护装备。避免直接接触。"
         physician = "无特效解毒剂。对症治疗。"
+
+        # 靶器官摘要（混合物模式）
+        if getattr(self, '_is_mixture', False):
+            agg = getattr(self, '_mixture_aggregator', None)
+            if agg:
+                organs = agg.get_target_organs_summary()
+                if organs:
+                    physician = f"本品含特异性靶器官毒性组分（{organs}）。无特效解毒剂。对症治疗，注意监测相关器官功能。"
 
         return (
             f"# 第四部分：急救措施\n\n"
@@ -744,10 +892,21 @@ class SDSGenerator:
                  "不燃烧，但与金属反应可产生易燃气体。" if is_corrosive else \
                  "参见具体化学品特性。 [待确认]"
 
-        # 注入KB消防注释
-        ff_notes = self._val(5, 'notes', '')
-        if ff_notes and "待确认" not in ff_notes:
-            hazard = f"{hazard}\n{ff_notes}"
+        # 混合物模式：聚合所有组分的消防注释和分解产物危害
+        extra_hazard_lines = []
+        if getattr(self, '_is_mixture', False):
+            agg = getattr(self, '_mixture_aggregator', None)
+            if agg:
+                ff_notes = agg.get_firefighting_notes()
+                extra_hazard_lines.extend(ff_notes)
+        else:
+            # 纯物质：注入KB消防注释
+            ff_notes = self._val(5, 'notes', '')
+            if ff_notes and "待确认" not in ff_notes:
+                extra_hazard_lines.append(ff_notes)
+
+        if extra_hazard_lines:
+            hazard += "\n" + "\n".join(f"- {n}" for n in extra_hazard_lines)
 
         media = "干粉、二氧化碳、泡沫、砂土。"
         prohibited = self._val(5, 'prohibited_media', '')
@@ -823,6 +982,15 @@ class SDSGenerator:
         if is_flammable and not is_gas:
             cleanup += "通风。"
 
+        # 混合物模式：追加靶器官特异性泄漏建议
+        spill_extra = []
+        if getattr(self, '_is_mixture', False):
+            agg = getattr(self, '_mixture_aggregator', None)
+            if agg:
+                spill_extra = agg.get_spill_notes()
+        if spill_extra:
+            personal += "\n" + "\n".join(f"- {n}" for n in spill_extra)
+
         return (
             f"# 第六部分：泄漏应急处理\n\n"
             f"**人员防护措施**: {personal}\n\n"
@@ -894,18 +1062,25 @@ class SDSGenerator:
 
     def generate_section_9(self) -> str:
         """第九部分：理化特性"""
+        # 获取原始值并去除已有单位，避免与模板追加的单位重复
+        def _s9(field_key, default='无可用数据 [待确认]'):
+            raw = self._val(9, field_key, default)
+            if '[待确认]' in raw:
+                return raw
+            return self._strip_unit(raw)
+
         return (
             f"# 第九部分：理化特性\n\n"
             f"| 特性 | 数值 |\n|------|------|\n"
             f"| 外观 | {self._val(9, 'appearance', '无可用数据 [待确认]')} |\n"
             f"| 气味 | {self._val(9, 'odor', '无可用数据 [待确认]')} |\n"
-            f"| 熔点 | {self._val(9, 'melting_point', '无可用数据 [待确认]')} °C |\n"
-            f"| 沸点 | {self._val(9, 'boiling_point', '无可用数据 [待确认]')} °C |\n"
-            f"| 闪点 | {self._val(9, 'flash_point', '无可用数据 [待确认]')} °C |\n"
-            f"| 密度 | {self._val(9, 'density', '无可用数据 [待确认]')} g/cm³ |\n"
-            f"| 蒸气压 | {self._val(9, 'vapor_pressure', '无可用数据 [待确认]')} kPa |\n"
+            f"| 熔点 | {_s9('melting_point')} °C |\n"
+            f"| 沸点 | {_s9('boiling_point')} °C |\n"
+            f"| 闪点 | {_s9('flash_point')} °C |\n"
+            f"| 密度 | {_s9('density')} g/cm³ |\n"
+            f"| 蒸气压 | {_s9('vapor_pressure')} kPa |\n"
             f"| 溶解性 | {self._val(9, 'solubility', '无可用数据 [待确认]')} |\n"
-            f"| 自燃温度 | {self._val(9, 'autoignition_temp', '无可用数据 [待确认]')} °C |\n"
+            f"| 自燃温度 | {_s9('autoignition_temp')} °C |\n"
             f"| 爆炸极限 | {self._val(9, 'explosion_limits', '无可用数据 [待确认]')} |\n"
             f"| 辛醇/水分配系数 | {self._val(9, 'partition_coefficient', '无可用数据 [待确认]')} |"
         )
@@ -1241,14 +1416,56 @@ def generate_mixture_sds(components_data: List[dict],
                        version=version, revision_date=revision_date,
                        revision_log=revision_log)
 
-    # 用第一个有数据的组分作为主数据源（用于理化特性等）
+    # 混合物危害聚合器：从所有组分聚合靶器官和特异性建议
+    gen._is_mixture = True
+    gen._components_data = components_data
+    gen._mixture_aggregator = SDSGenerator.MixtureHazardAggregator(components_data)
+
+    # 用第一个有数据的组分作为内部参考（毒理、运输等），但不清空到S1/S9
     for comp in components_data:
         if comp:
             gen.set_chemical_data(comp)
             break
 
+    # 混合物模式：清空S1（化学品标识）— 名称由用户指定，其他字段不适用
+    s1 = gen.document.sections[1]
+    for key in ["cas_number", "molecular_formula", "molecular_weight",
+                "un_number", "ec_number", "iupac_name", "product_name_en"]:
+        s1.fields.pop(key, None)
+    if product_name:
+        s1.fields["product_name_cn"] = FieldValue(value=product_name, source="input")
+    else:
+        s1.fields.pop("product_name_cn", None)
+
+    # 混合物模式：清空S9（理化特性）— 由用户输入
+    gen.document.sections[9].fields.clear()
+
     gen.set_classification(mixture_classifications)
     gen.set_components(components_data, is_mixture=True)
+
+    # 混合物模式：用分类计算的ATE覆盖S11毒理数据（不应显示第一组分LD50）
+    s11 = gen.document.sections[11]
+    for cls_item in mixture_classifications:
+        hazard = cls_item.get("hazard", "")
+        ate_val = cls_item.get("ate")
+        if ate_val:
+            if "oral" in hazard:
+                s11.fields["ld50_oral"] = FieldValue(
+                    value=f"ATE = {ate_val:.0f} mg/kg（混合物计算值）",
+                    source="classification")
+            elif "dermal" in hazard:
+                s11.fields["ld50_dermal"] = FieldValue(
+                    value=f"ATE = {ate_val:.0f} mg/kg（混合物计算值）",
+                    source="classification")
+            elif "inhalation" in hazard:
+                s11.fields["lc50_inhalation"] = FieldValue(
+                    value=f"ATE = {ate_val:.1f} mg/L（混合物计算值）",
+                    source="classification")
+
+    # 混合物模式：清空S14运输信息（不应使用第一组分的UN号）
+    s14 = gen.document.sections[14]
+    for key in ["un_number"]:
+        s14.fields.pop(key, None)
 
     content = gen.generate()
     return content, gen.get_review_flags()

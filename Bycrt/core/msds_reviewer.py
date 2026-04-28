@@ -269,9 +269,9 @@ class MSDSReviewer:
         first_aid = self._extract_section("第四部分：急救措施")
         if first_aid:
             required_elements = ["就医", "冲洗"]
-            # "脱去"仅对腐蚀品必须
+            # "脱去"仅对皮肤腐蚀品必须（精确匹配，避免误判含"腐蚀"字样的非腐蚀分类）
             sec2 = self._get_section_text(2)
-            if "腐蚀" in sec2:
+            if "皮肤腐蚀" in sec2 or "金属腐蚀" in sec2:
                 required_elements.append("脱去")
             for elem in required_elements:
                 if elem not in first_aid:
@@ -333,8 +333,9 @@ class MSDSReviewer:
             if "闪点" not in sec9_text:
                 issues.append("第2节有易燃分类，但第9节缺少闪点数据")
 
-        # 规则2: 腐蚀 → 防护
-        if "腐蚀" in sec2_text:
+        # 规则2: 腐蚀 → 防护（精确匹配皮肤腐蚀/金属腐蚀，避免误判）
+        has_corrosion = "皮肤腐蚀" in sec2_text or "金属腐蚀" in sec2_text
+        if has_corrosion:
             if "防护手套" not in sec8_text and "防护服" not in sec8_text:
                 issues.append("第2节有腐蚀分类，但第8节缺少防护建议")
 
@@ -420,8 +421,8 @@ class MSDSReviewer:
             if low_ld50 and float(low_ld50.group(1)) < 500:
                 issues.append(f"第2节无急性毒性分类，但第11节LD50={low_ld50.group(1)}mg/kg较低，应考虑分类")
 
-        # 规则3: 第2节有腐蚀 → 第5节应有腐蚀相关消防建议
-        if "腐蚀" in sec2:
+        # 规则3: 第2节有皮肤腐蚀/金属腐蚀 → 第5节应有腐蚀相关消防建议
+        if "皮肤腐蚀" in sec2 or "金属腐蚀" in sec2:
             sec5 = self._get_section_text(5)
             if sec5 and "腐蚀" not in sec5:
                 issues.append("第2节有腐蚀分类，但第5节消防措施未提及腐蚀风险")
