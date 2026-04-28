@@ -936,6 +936,14 @@ class SDSGenerator:
             "rescuer": "救援人员应穿着适当的防护装备。注意氧化性物质接触有机物可能引发火灾。",
             "physician": "注意氧化性物质对粘膜的刺激作用。对症治疗。",
         },
+        "flammable_solid": {
+            "inhalation": "将患者移至空气新鲜处。如呼吸困难，给予吸氧。如呼吸停止，进行人工呼吸。立即就医。注意粉尘吸入。",
+            "skin": "用大量水和肥皂冲洗。如有刺激或烧伤，就医。如皮肤粘有熔融物，不要强行撕脱，用冷水冲洗。",
+            "eye": "用大量水冲洗几分钟。如持续刺激，就医。注意粉尘对眼睛的刺激。",
+            "ingestion": "漱口。给水稀释。不要催吐。如感觉不适，就医。",
+            "rescuer": "救援人员应佩戴防护装备，远离火源。避免吸入粉尘。",
+            "physician": "对症治疗。注意粉尘吸入对呼吸道的影响。",
+        },
         "general": {
             "inhalation": "将患者移至空气新鲜处。如呼吸困难，给予吸氧。如呼吸停止，进行人工呼吸。如持续不适，就医。",
             "skin": "用大量水和肥皂冲洗。如有刺激，就医。",
@@ -1058,6 +1066,12 @@ class SDSGenerator:
             "prohibited": "禁止使用直流水（可能扩大有毒物质扩散范围）。",
             "advice": "消防人员必须佩戴自给式正压呼吸器，穿全身化学防护服。从上风方向灭火。防止灭火废水流入水体。火灾现场应设置警戒线。",
         },
+        "heavy_metal": {
+            "hazard": "不燃。受热产生有毒金属烟雾。金属粉末可能形成爆炸性粉尘。",
+            "media": "干粉、干砂、二氧化碳。金属火灾使用D类灭火器或干燥砂土覆盖。",
+            "prohibited": "禁止用水（某些金属遇水反应）、禁止使用泡沫和CO2（对金属火灾无效）。",
+            "advice": "消防人员必须佩戴自给式正压呼吸器，穿全身隔热防火服。注意有毒金属烟雾。不要让灭火废水流入水体。收集受污染的灭火用水。",
+        },
         "general": {
             "hazard": "参见具体化学品特性。",
             "media": "干粉、二氧化碳、泡沫、砂土。",
@@ -1067,24 +1081,53 @@ class SDSGenerator:
     }
 
     def generate_section_5(self) -> str:
-        """第五部分：消防措施（基于化学品类型的特异性建议）"""
+        """第五部分：消防措施（基于化学品类型的特异性建议，支持多类型综合）"""
         chem_types = self._get_chemical_types()
 
-        # 选择主要消防方案
-        type_priority = ["oxidizer", "compressed_gas", "corrosive_alkali", "corrosive_acid",
-                         "toxic", "flammable_solid", "flammable_liquid", "general"]
-        primary_type = "general"
-        for t in type_priority:
-            if t in chem_types:
-                primary_type = t
-                break
+        # 综合多类型的消防建议（不再只选一种）
+        hazard_parts = []
+        media_parts = []
+        prohibited_parts = []
+        advice_parts = []
 
-        kb = self._FIREFIGHTING_KB.get(primary_type, self._FIREFIGHTING_KB["general"])
+        # 按危险优先级收集各类型的消防建议
+        type_order = ["flammable_liquid", "flammable_solid", "oxidizer", "compressed_gas",
+                      "toxic", "corrosive_acid", "corrosive_alkali", "heavy_metal"]
+        for t in type_order:
+            if t in chem_types and t in self._FIREFIGHTING_KB:
+                kb = self._FIREFIGHTING_KB[t]
+                if kb["hazard"] not in hazard_parts:
+                    hazard_parts.append(kb["hazard"])
+                if kb["media"] not in media_parts:
+                    media_parts.append(kb["media"])
+                if kb["prohibited"] not in prohibited_parts:
+                    prohibited_parts.append(kb["prohibited"])
+                if kb["advice"] not in advice_parts:
+                    advice_parts.append(kb["advice"])
 
-        hazard = kb["hazard"]
-        media = kb["media"]
-        prohibited = kb["prohibited"]
-        advice = kb["advice"]
+        if not hazard_parts:
+            kb = self._FIREFIGHTING_KB["general"]
+            hazard_parts = [kb["hazard"]]
+            media_parts = [kb["media"]]
+            prohibited_parts = [kb["prohibited"]]
+            advice_parts = [kb["advice"]]
+
+        # 组合：第一条完整展示，后续类型只展示额外要点
+        if len(hazard_parts) > 1:
+            hazard = hazard_parts[0]
+            for extra in hazard_parts[1:]:
+                # 提取关键差异（去掉"不燃"等与第一条矛盾的描述）
+                if "不燃" in extra:
+                    extra = extra.replace("不燃。", "").replace("不燃", "")
+                if extra.strip():
+                    hazard += " " + extra.strip()
+        else:
+            hazard = hazard_parts[0]
+
+        media = "；".join(media_parts) if media_parts else "干粉、二氧化碳、泡沫、砂土。"
+        prohibited = prohibited_parts[0] if prohibited_parts else "无特殊禁止要求。"
+        # 取最严格的消防建议
+        advice = advice_parts[0] if advice_parts else ""
 
         # 混合物模式：聚合所有组分的消防注释和分解产物危害
         extra_hazard_lines = []
@@ -1564,6 +1607,12 @@ class SDSGenerator:
             "container": "钢瓶返回供应商。不得随意切割或破坏钢瓶。",
             "regulation": "按气体具体成分确定废物类别。",
             "note": "排放前确认气体性质，确保安全。有毒气体不得直接排放至大气中。",
+        },
+        "flammable_solid": {
+            "method": "焚烧处理。或在安全条件下燃烧处理。委托有资质的危险废物处理单位处理。",
+            "container": "废弃容器交由有资质单位处理。彻底清洁后方可回收利用。容器内不得有残留物。",
+            "regulation": "《国家危险废物名录》按具体成分确定废物类别。",
+            "note": "处理过程中应远离火源。防止粉尘飞扬形成爆炸性混合物。",
         },
         "general": {
             "method": "按照国家和地方相关法规要求进行处置。委托有资质的危险废物处理单位处理。",
