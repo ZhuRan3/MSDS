@@ -1537,31 +1537,45 @@ class SDSGenerator:
 
     def generate_section_12(self) -> str:
         """第十二部分：生态学信息"""
-        fish = self._val(12, 'ecotoxicity_fish_lc50')
-        daphnia = self._val(12, 'ecotoxicity_daphnia_ec50')
-        algae = self._val(12, 'ecotoxicity_algae_ec50')
+        s12 = self.document.sections[12]
+
+        # 生态毒性：优先使用聚合字段，否则组合单项
+        eco_text = self._val(12, 'ecotoxicity', '')
+        if not eco_text or "无可用" in eco_text:
+            fish = self._val(12, 'ecotoxicity_fish_lc50')
+            daphnia = self._val(12, 'ecotoxicity_daphnia_ec50')
+            algae = self._val(12, 'ecotoxicity_algae_ec50')
+            parts = []
+            if "待确认" not in fish:
+                parts.append(f"鱼类LC50: {fish}")
+            if "待确认" not in daphnia:
+                parts.append(f"水蚤EC50: {daphnia}")
+            if "待确认" not in algae:
+                parts.append(f"藻类EC50: {algae}")
+            eco_text = "；".join(parts) if parts else "无可用数据 [待确认]"
+
+        # 持久性和降解性
         persistence = self._val(12, 'persistence_degradability')
-        bcf = self._val(12, 'bioaccumulation_bcf')
-        log_bc = self._val(12, 'bioaccumulation_log_bc')
 
-        eco_text = ""
-        if fish != "无可用数据 [待确认]" or daphnia != "无可用数据 [待确认]" or algae != "无可用数据 [待确认]":
-            eco_text = f"鱼类LC50: {fish}; 水蚤EC50: {daphnia}; 藻类EC50: {algae}"
-        else:
-            eco_text = "无可用数据 [待确认]"
+        # 生物富集
+        bioaccum_text = self._val(12, 'bioaccumulation_potential', '')
+        if not bioaccum_text or "无可用" in bioaccum_text:
+            bcf = self._val(12, 'bioaccumulation_bcf')
+            log_bc = self._val(12, 'bioaccumulation_log_bc')
+            if "待确认" not in bcf or "待确认" not in log_bc:
+                bioaccum_text = f"BCF: {bcf}; LogBC: {log_bc}"
+            else:
+                bioaccum_text = "无可用数据 [待确认]"
 
-        bio_text = ""
-        if bcf != "无可用数据 [待确认]" or log_bc != "无可用数据 [待确认]":
-            bio_text = f"BCF: {bcf}; LogBC: {log_bc}"
-        else:
-            bio_text = "无可用数据 [待确认]"
+        # 土壤迁移性
+        soil = self._val(12, 'mobility_in_soil')
 
         return (
             f"# 第十二部分：生态学信息\n\n"
             f"**生态毒性**: {eco_text}\n\n"
             f"**持久性和降解性**: {persistence}\n\n"
-            f"**生物富集潜力**: {bio_text}\n\n"
-            f"**土壤中的迁移性**: {self._val(12, 'mobility_in_soil', '无可用数据 [待确认]')}"
+            f"**生物富集潜力**: {bioaccum_text}\n\n"
+            f"**土壤中的迁移性**: {soil}"
         )
 
     # 废弃处置知识库
@@ -2017,10 +2031,67 @@ def generate_mixture_sds(components_data: List[dict],
             s9.fields["melting_point"] = FieldValue(value=f"{mp_min:.0f}", source="aggregation")
         else:
             s9.fields["melting_point"] = FieldValue(value=f"{mp_min:.0f}~{mp_max:.0f}", source="aggregation")
-    # 溶解性聚合
-    if solubilities:
-        unique_sol = list(dict.fromkeys(solubilities))[:3]
+    # 溶解性聚合（从KB的solubility字段）
+    sol_values = []
+    for comp in components_data:
+        sol = str(comp.get("solubility", comp.get("solubility_details", "")))
+        if sol and "无可用" not in sol:
+            sol_values.append(sol)
+    if sol_values:
+        unique_sol = list(dict.fromkeys(sol_values))[:4]
         s9.fields["solubility"] = FieldValue(value="；".join(unique_sol), source="aggregation")
+    else:
+        # 推断：含有机溶剂组分
+        s9.fields["solubility"] = FieldValue(value="溶解性因组分而异，参见第三部分各组分数据", source="inference")
+
+    # 蒸气压聚合
+    vapor_pressures = []
+    for comp in components_data:
+        vp = str(comp.get("vapor_pressure", ""))
+        vp_match = re.search(r'[\d.]+', vp)
+        if vp_match:
+            vapor_pressures.append(float(vp_match.group()))
+    if vapor_pressures:
+        vp_min = min(vapor_pressures)
+        vp_max = max(vapor_pressures)
+        if vp_min == vp_max:
+            s9.fields["vapor_pressure"] = FieldValue(value=f"{vp_min:.1f}", source="aggregation")
+        else:
+            s9.fields["vapor_pressure"] = FieldValue(value=f"{vp_min:.1f}~{vp_max:.1f}", source="aggregation")
+    else:
+        # 推断：含低沸点有机溶剂，蒸气压较高
+        if boiling_points and min(boiling_points) < 100:
+            s9.fields["vapor_pressure"] = FieldValue(value="含低沸点组分，室温下蒸气压较高（推断）", source="inference")
+
+    # 自燃温度聚合
+    autoign_temps = []
+    for comp in components_data:
+        ai = str(comp.get("autoignition_temp", ""))
+        ai_match = re.search(r'[\d.]+', ai)
+        if ai_match:
+            autoign_temps.append(float(ai_match.group()))
+    if autoign_temps:
+        s9.fields["autoignition_temp"] = FieldValue(value=f"{min(autoign_temps):.0f}（最低组分值）", source="aggregation")
+
+    # 爆炸极限聚合
+    expl_limits = []
+    for comp in components_data:
+        el = str(comp.get("explosion_limits", ""))
+        if el and "无可用" not in el:
+            expl_limits.append(el)
+    if expl_limits:
+        s9.fields["explosion_limits"] = FieldValue(value="；".join(list(dict.fromkeys(expl_limits))[:3]), source="aggregation")
+
+    # 辛醇/水分配系数（xlogp聚合）
+    xlogp_values = []
+    for comp in components_data:
+        xlp = str(comp.get("xlogp", comp.get("partition_coefficient_n-octanol_water", "")))
+        xlp_match = re.search(r'-?[\d.]+', xlp)
+        if xlp_match:
+            xlogp_values.append(float(xlp_match.group()))
+    if xlogp_values:
+        s9.fields["partition_coefficient"] = FieldValue(
+            value=f"各组分LogP范围: {min(xlogp_values):.1f}~{max(xlogp_values):.1f}", source="aggregation")
 
     # 混合物S8接触限值：从组分聚合
     s8 = gen.document.sections[8]
@@ -2104,6 +2175,46 @@ def generate_mixture_sds(components_data: List[dict],
     # 致敏
     if "致敏" in all_ghs_text:
         s11.fields.setdefault("skin_sensitization", FieldValue(value="根据组分分类推断", source="classification"))
+
+    # 混合物S12生态学：从组分聚合生态数据
+    s12 = gen.document.sections[12]
+    eco_tox = []
+    eco_degrad = []
+    eco_bcf = []
+    eco_soil = []
+    for comp in components_data:
+        name = comp.get("chemical_name_cn", comp.get("name", ""))
+        # 生态毒性
+        for fish_key in ["ecotoxicity_fish_lc50", "ecotoxicity_daphnia_ec50", "ecotoxicity_algae_ec50"]:
+            val = comp.get(fish_key)
+            if val and "无可用" not in str(val):
+                eco_tox.append(f"{name}: {val}")
+        # 持久性和降解性
+        degrad = comp.get("persistence_degradability", "")
+        if degrad and "无可用" not in str(degrad):
+            eco_degrad.append(f"{name}: {degrad}")
+        # 生物富集
+        bcf = comp.get("bioaccumulation_bcf", "")
+        if bcf and "无可用" not in str(bcf):
+            eco_bcf.append(f"{name}: {bcf}")
+        # 土壤迁移性
+        soil = comp.get("mobility_in_soil", "")
+        if soil and "无可用" not in str(soil):
+            eco_soil.append(f"{name}: {soil}")
+    # 从GHS分类推断水生毒性
+    aquatic_hazards = [g for g in all_comp_ghs if "水生" in str(g)]
+    if aquatic_hazards and not eco_tox:
+        eco_tox.append(f"根据组分分类，含对水生环境有害组分: {', '.join(set(str(h) for h in aquatic_hazards[:5]))}")
+    if eco_tox:
+        s12.fields["ecotoxicity"] = FieldValue(value="；".join(eco_tox[:6]), source="aggregation")
+    if eco_degrad:
+        s12.fields["persistence_degradability"] = FieldValue(value="；".join(eco_degrad[:6]), source="aggregation")
+    elif any("芳香烃" in str(c.get("chemical_family", "")) for c in components_data):
+        s12.fields["persistence_degradability"] = FieldValue(value="含芳香烃组分，可生物降解但需较长时间", source="inference")
+    if eco_bcf:
+        s12.fields["bioaccumulation_potential"] = FieldValue(value="；".join(eco_bcf[:6]), source="aggregation")
+    if eco_soil:
+        s12.fields["mobility_in_soil"] = FieldValue(value="；".join(eco_soil[:6]), source="aggregation")
 
     # 混合物S14运输：推导运输类别、UN编号、包装类别和海洋污染物
     s14 = gen.document.sections[14]

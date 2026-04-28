@@ -313,36 +313,54 @@ class EvidenceRetriever:
                     confidence=0.8,
                 ))
 
-        # 理化性质字段
-        phys_fields = [
-            "flash_point", "boiling_point", "melting_point", "density",
-            "vapor_pressure", "autoignition_temp", "explosion_limits",
-            "solubility_details", "partition_coefficient_n-octanol_water",
+        # 理化性质字段（含KB别名映射）
+        phys_field_aliases = [
+            ("flash_point", "flash_point"),
+            ("boiling_point", "boiling_point"),
+            ("melting_point", "melting_point"),
+            ("density", "density"),
+            ("vapor_pressure", "vapor_pressure"),
+            ("autoignition_temp", "autoignition_temp"),
+            ("explosion_limits", "explosion_limits"),
+            ("solubility_details", "solubility_details"),
+            ("solubility", "solubility"),            # KB直接存solubility
+            ("partition_coefficient_n-octanol_water", "partition_coefficient_n-octanol_water"),
+            ("xlogp", "xlogp"),                       # KB存xlogp (辛醇水分配系数)
+            ("appearance", "appearance"),
+            ("odor", "odor"),
         ]
-        for f in phys_fields:
-            val = data.get(f)
+        for data_key, field_name in phys_field_aliases:
+            val = data.get(data_key)
             if val:
-                pool.add_evidence(f, Evidence(
-                    field_name=f,
+                pool.add_evidence(field_name, Evidence(
+                    field_name=field_name,
                     value=val,
                     source="local_kb",
                     source_type=SourcePriority.LOCAL_KB,
                     confidence=0.75,
                 ))
 
-        # 毒理学字段
-        tox_fields = [
-            "ld50_oral", "ld50_dermal", "lc50_inhalation",
-            "skin_corrosion_category", "eye_damage_category",
-            "skin_sensitization", "mutagenicity",
-            "carcinogenicity_ghs", "reproductive_toxicity_category",
-            "stot_single_exposure", "stot_repeated_exposure",
+        # 毒理学字段（含KB中文别名）
+        tox_field_aliases = [
+            ("ld50_oral", "ld50_oral"),
+            ("ld50_dermal", "ld50_dermal"),
+            ("lc50_inhalation", "lc50_inhalation"),
+            ("skin_corrosion_category", "skin_corrosion_category"),
+            ("皮肤腐蚀类别", "skin_corrosion_category"),     # KB中文别名
+            ("eye_damage_category", "eye_damage_category"),
+            ("眼损伤类别", "eye_damage_category"),            # KB中文别名
+            ("skin_sensitization", "skin_sensitization"),
+            ("mutagenicity", "mutagenicity"),
+            ("carcinogenicity_ghs", "carcinogenicity_ghs"),
+            ("reproductive_toxicity_category", "reproductive_toxicity_category"),
+            ("stot_single_exposure", "stot_single_exposure"),
+            ("stot_repeated_exposure", "stot_repeated_exposure"),
         ]
-        for f in tox_fields:
-            val = data.get(f)
+        for data_key, field_name in tox_field_aliases:
+            val = data.get(data_key)
             if val:
-                pool.add_evidence(f, Evidence(
-                    field_name=f,
+                pool.add_evidence(field_name, Evidence(
+                    field_name=field_name,
                     value=val,
                     source="local_kb",
                     source_type=SourcePriority.LOCAL_KB,
@@ -411,36 +429,32 @@ class EvidenceRetriever:
                     confidence=0.75,
                 ))
 
-        # 生态信息
-        eco_fields = [
-            "ecotoxicity_fish_lc50", "ecotoxicity_daphnia_ec50",
-            "ecotoxicity_algae_ec50", "persistence_degradability",
-            "bioaccumulation_bcf", "bioaccumulation_log_bc",
-            "mobility_in_soil",
+        # 生态信息（含KB中文别名）
+        eco_field_aliases = [
+            ("ecotoxicity_fish_lc50", "ecotoxicity_fish_lc50"),
+            ("ecotoxicity_daphnia_ec50", "ecotoxicity_daphnia_ec50"),
+            ("ecotoxicity_algae_ec50", "ecotoxicity_algae_ec50"),
+            ("persistence_degradability", "persistence_degradability"),
+            ("生物降解性", "persistence_degradability"),        # KB中文别名
+            ("bioaccumulation_bcf", "bioaccumulation_bcf"),
+            ("BCF生物富集系数", "bioaccumulation_bcf"),         # KB中文别名
+            ("bioaccumulation_log_bc", "bioaccumulation_log_bc"),
+            ("mobility_in_soil", "mobility_in_soil"),
+            ("Koc土壤迁移系数", "mobility_in_soil"),            # KB中文别名
         ]
-        for f in eco_fields:
-            val = data.get(f)
+        for data_key, field_name in eco_field_aliases:
+            val = data.get(data_key)
             if val:
-                pool.add_evidence(f, Evidence(
-                    field_name=f,
+                pool.add_evidence(field_name, Evidence(
+                    field_name=field_name,
                     value=val,
                     source="local_kb",
                     source_type=SourcePriority.LOCAL_KB,
                     confidence=0.7,
                 ))
 
-        # 理化辅助字段
-        extra_phys = ["appearance", "odor"]
-        for f in extra_phys:
-            val = data.get(f)
-            if val:
-                pool.add_evidence(f, Evidence(
-                    field_name=f,
-                    value=val,
-                    source="local_kb",
-                    source_type=SourcePriority.LOCAL_KB,
-                    confidence=0.75,
-                ))
+        # 理化辅助字段 — 已合并到phys_field_aliases中，此处保留appearance/odor的独立提取以防遗漏
+        # (已在上方phys_field_aliases中包含)
 
         # 反应性与安全
         reactive_fields = [
