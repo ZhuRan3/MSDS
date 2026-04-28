@@ -660,6 +660,62 @@ class SDSGenerator:
                 return True
         return False
 
+    def _get_chemical_types(self) -> List[str]:
+        """根据GHS分类+物性推断化学品类型标签列表"""
+        types = set()
+        classifications = getattr(self, '_classifications', [])
+        ghs_text = " ".join(c.get("hazard", "") for c in classifications)
+        kb = getattr(self, '_kb_data', {})
+
+        # 易燃液体（闪点<60°C）
+        if "易燃液体" in ghs_text:
+            types.add("flammable_liquid")
+        # 腐蚀性酸/碱
+        if "皮肤腐蚀" in ghs_text or "金属腐蚀" in ghs_text:
+            # 通过pH或成分区分酸/碱
+            formula = str(kb.get("molecular_formula", ""))
+            name = str(kb.get("chemical_name_cn", ""))
+            acid_hints = ["HCl", "H2SO4", "HNO3", "H3PO4", "HF", "酸"]
+            base_hints = ["NaOH", "KOH", "Ca(OH)2", "NH3", "碱", "氢氧化"]
+            if any(h in formula or h in name for h in acid_hints):
+                types.add("corrosive_acid")
+            elif any(h in formula or h in name for h in base_hints):
+                types.add("corrosive_alkali")
+            else:
+                types.add("corrosive_acid")  # 默认按酸处理
+        # 急性毒性
+        if "急性毒性" in ghs_text:
+            types.add("toxic")
+        # 氧化性
+        if "氧化性" in ghs_text:
+            types.add("oxidizer")
+        # 易燃固体
+        if "易燃固体" in ghs_text:
+            types.add("flammable_solid")
+        # 自反应/爆炸
+        if "自反应" in ghs_text or "爆炸" in ghs_text:
+            types.add("explosive")
+        # 高压气体
+        if "高压气体" in ghs_text or "加压气体" in ghs_text or "液化气体" in ghs_text:
+            types.add("compressed_gas")
+        # 重金属
+        formula = str(kb.get("molecular_formula", ""))
+        heavy_metals = ["Pb", "Hg", "Cd", "Cr", "As", "Cu", "Zn", "Ni", "Co"]
+        if any(el in formula for el in heavy_metals):
+            types.add("heavy_metal")
+        # 有机溶剂（含碳 + 易燃）
+        if "C" in formula and "flammable_liquid" in types:
+            types.add("organic_solvent")
+        # 吸入危害
+        if "吸入危害" in ghs_text:
+            types.add("aspiration_hazard")
+
+        return list(types) if types else ["general"]
+
+    def _is_chemical_type(self, type_name: str) -> bool:
+        """快速判断是否属于某种化学品类型"""
+        return type_name in self._get_chemical_types()
+
     def _try_llm_enhance(self, section_id: int, template_content: str) -> str:
         """尝试用LLM增强章节内容，失败时返回原始模板内容"""
         if not self.use_llm:
@@ -822,18 +878,88 @@ class SDSGenerator:
 
         return f"# 第三部分：成分/组成信息\n\n**类型**: {chem_type}\n\n{self._val(3, 'components', '无可用数据 [待确认]')}"
 
-    def generate_section_4(self) -> str:
-        """第四部分：急救措施（基于分类规则 + KB/组分聚合特异性注释）"""
-        is_corrosive = self._has_classification("皮肤腐蚀") or self._has_classification("腐蚀")
-        is_toxic = self._has_classification("急性毒性")
+    # 急救知识库：按化学品类型提供特异性急救建议
+    _FIRST_AID_KB = {
+        "corrosive_acid": {
+            "inhalation": "立即将患者移至空气新鲜处。如呼吸困难，给予吸氧。如呼吸停止，进行人工呼吸（注意：施救者勿口对口接触腐蚀性气体）。立即就医。",
+            "skin": "立即脱去被污染的衣物。用大量流动清水冲洗至少30分钟。不可使用化学中和剂。冲洗时注意不要将化学品扩散到未受影响的皮肤。立即就医。",
+            "eye": "立即翻开上下眼睑，用大量流动清水或生理盐水冲洗至少30分钟。如戴隐形眼镜且易取下，先取下再继续冲洗。不可揉眼睛。立即送往眼科就医。",
+            "ingestion": "不要催吐（腐蚀性物质催吐可造成食道二次损伤）。不要经口给任何物质。立即就医。如患者意识清醒，可用水漱口。",
+            "rescuer": "救援人员必须佩戴防酸碱面罩、穿耐酸碱防护服、戴橡胶手套。避免直接接触污染物。",
+            "physician": "如误食，考虑内窥镜检查以评估食道和胃的损伤程度。避免洗胃。注意监测酸碱平衡和电解质。",
+        },
+        "corrosive_alkali": {
+            "inhalation": "立即将患者移至空气新鲜处。保持安静、保暖。如呼吸困难，给予吸氧。如呼吸停止，进行人工呼吸。立即就医。",
+            "skin": "立即脱去被污染的衣物。用大量流动清水冲洗至少60分钟。碱腐蚀比酸腐蚀更深，冲洗时间必须更长。不可使用化学中和剂。立即就医。",
+            "eye": "这是眼科急症。立即翻开上下眼睑，用大量流动清水或生理盐水持续冲洗至少60分钟。碱灼伤可致永久失明。立即送往眼科就医。",
+            "ingestion": "绝对不要催吐。不要经口给任何物质。碱液可造成食道深层坏死。立即就医。",
+            "rescuer": "救援人员必须佩戴防碱面罩、穿耐碱防护服、戴橡胶手套。避免吸入碱雾。",
+            "physician": "碱灼伤比酸灼伤更具侵蚀性，可能造成深层组织坏死。眼部碱灼伤需持续冲洗并请眼科会诊。如误食，考虑内窥镜检查。",
+        },
+        "flammable_liquid": {
+            "inhalation": "将患者移至空气新鲜处。保持安静、保暖。如呼吸困难，给予吸氧。如呼吸停止，进行人工呼吸（注意：施救者勿吸入蒸气）。如出现中毒症状就医。",
+            "skin": "立即脱去被污染的衣物。用大量肥皂水和清水彻底冲洗皮肤。被污染的衣物须彻底清洗后方可重新使用。如刺激持续，就医。",
+            "eye": "立即用大量清水冲洗几分钟。如戴隐形眼镜且易取下，取下后继续冲洗。如持续刺激或疼痛，就医。",
+            "ingestion": "不要催吐（有吸入性肺炎风险）。如患者意识清醒，用水漱口。给200-300mL水稀释（在意识清醒情况下）。禁止给失去意识者经口任何物质。立即就医。",
+            "rescuer": "救援人员应佩戴适当的防护装备。注意远离火源。避免吸入蒸气。",
+            "physician": "注意吸入性肺炎风险。如大量吞咽，考虑洗胃（仅在专业人员操作下）。对症支持治疗。",
+        },
+        "toxic": {
+            "inhalation": "立即将患者移至空气新鲜处。保持安静、保暖。如呼吸困难，给予吸氧。如呼吸停止，进行人工呼吸（注意：避免口对口人工呼吸，应使用器械通气）。立即就医。",
+            "skin": "立即脱去被污染的衣物。用大量肥皂水和清水冲洗皮肤。被污染的衣物须彻底清洗后方可重新使用。立即就医。",
+            "eye": "立即用大量清水冲洗至少15分钟，提起上下眼睑确保彻底冲洗。如戴隐形眼镜且易取下，先取下再继续冲洗。立即就医。",
+            "ingestion": "不要催吐。如患者意识清醒，用水漱口。禁止给失去意识者经口任何物质。立即呼叫中毒控制中心或就医。",
+            "rescuer": "救援人员必须佩戴适当的呼吸防护和化学防护装备。避免直接接触。确保自身安全后再进行施救。",
+            "physician": "本品的毒性作用可能延迟出现。至少观察24-48小时。根据暴露途径和剂量进行对症治疗。",
+        },
+        "heavy_metal": {
+            "inhalation": "立即将患者移至空气新鲜处。保持安静、保暖。如呼吸困难，给予吸氧。立即就医。告知医生可能的金属暴露。",
+            "skin": "立即脱去被污染的衣物。用大量清水和肥皂冲洗。立即就医。",
+            "eye": "立即用大量清水冲洗至少15分钟。立即就医。",
+            "ingestion": "不要催吐。如患者意识清醒，用水漱口。给活性炭（如适用）。立即就医。告知医生具体的金属种类。",
+            "rescuer": "救援人员应佩戴防尘面具、化学防护服和手套。避免吸入粉尘和蒸气。",
+            "physician": "监测重金属血/尿浓度。考虑使用螯合剂（如DMSA、EDTA等，需根据具体金属选择）。注意肝肾功能损害。",
+        },
+        "compressed_gas": {
+            "inhalation": "立即将患者移至空气新鲜处。保持安静、保暖。如呼吸困难，给予吸氧。如呼吸停止，进行人工呼吸。立即就医。冻伤部位用温水缓慢复温，不要揉搓。",
+            "skin": "如发生冻伤，将患部浸入温水（不超过40°C）中。不要揉搓冻伤部位。立即就医。",
+            "eye": "如接触液化气体导致冻伤，用大量温水冲洗眼睛。立即就医。",
+            "ingestion": "不适用（气体物质）。",
+            "rescuer": "救援人员应佩戴自给式呼吸器。注意高压气体喷射危险。防止气体在低洼处聚集。",
+            "physician": "注意冻伤和窒息风险。高压气体可能造成气栓。对症支持治疗。",
+        },
+        "oxidizer": {
+            "inhalation": "将患者移至空气新鲜处。如呼吸困难，给予吸氧。如持续不适，就医。",
+            "skin": "立即用大量清水冲洗。脱去被污染的衣物。如刺激持续，就医。",
+            "eye": "立即用大量清水冲洗几分钟。如持续刺激，就医。",
+            "ingestion": "漱口。给水稀释。不要催吐。立即就医。",
+            "rescuer": "救援人员应穿着适当的防护装备。注意氧化性物质接触有机物可能引发火灾。",
+            "physician": "注意氧化性物质对粘膜的刺激作用。对症治疗。",
+        },
+        "general": {
+            "inhalation": "将患者移至空气新鲜处。如呼吸困难，给予吸氧。如呼吸停止，进行人工呼吸。如持续不适，就医。",
+            "skin": "用大量水和肥皂冲洗。如有刺激，就医。",
+            "eye": "用大量水冲洗几分钟。如持续刺激，就医。",
+            "ingestion": "漱口。给水稀释。如感觉不适，就医。",
+            "rescuer": "救援人员应佩戴适当的防护装备。避免直接接触。",
+            "physician": "无特效解毒剂。对症治疗。",
+        },
+    }
 
-        inhalation = "将患者移至空气新鲜处。如呼吸困难，给予吸氧。如呼吸停止，进行人工呼吸。立即就医。"
-        skin = "立即用大量流动水冲洗至少15分钟。脱去被污染的衣物。就医。" if is_corrosive else \
-               "用大量水和肥皂冲洗。如有刺激，就医。"
-        eye = "立即用大量水冲洗至少15分钟，提起上下眼睑。如戴隐形眼镜且易取下，取下。立即就医。" if is_corrosive else \
-              "用大量水冲洗几分钟。如持续刺激，就医。"
-        ingestion = "漱口。不要催吐。给少量水稀释。立即就医。" if is_corrosive or is_toxic else \
-                    "漱口。给水稀释。如感觉不适，就医。"
+    def generate_section_4(self) -> str:
+        """第四部分：急救措施（基于化学品类型的特异性建议）"""
+        chem_types = self._get_chemical_types()
+
+        # 从最严重的类型选择急救方案（优先级：腐蚀碱 > 腐蚀酸 > 毒性 > 重金属 > 压缩气体 > 氧化 > 易燃 > 通用）
+        type_priority = ["corrosive_alkali", "corrosive_acid", "toxic", "heavy_metal",
+                         "compressed_gas", "oxidizer", "flammable_liquid", "flammable_solid", "general"]
+        primary_type = "general"
+        for t in type_priority:
+            if t in chem_types:
+                primary_type = t
+                break
+
+        kb = self._FIRST_AID_KB.get(primary_type, self._FIRST_AID_KB["general"])
 
         # 混合物模式：聚合所有组分的特异性注释和靶器官建议
         mixture_notes = {"inhalation": [], "skin": [], "eye": [], "ingestion": []}
@@ -843,25 +969,24 @@ class SDSGenerator:
                 mixture_notes = agg.get_first_aid_notes()
 
         # 注入KB特异性注释（纯物质模式用单组分KB，混合物模式用聚合结果）
-        route_map = {"inhalation": inhalation, "skin": skin, "eye": eye, "ingestion": ingestion}
-        for route in route_map:
-            # 先尝试组分聚合注释
+        route_map = {}
+        for route in ["inhalation", "skin", "eye", "ingestion"]:
+            base = kb.get(route, self._FIRST_AID_KB["general"][route])
             extra_lines = []
             agg_notes = mixture_notes.get(route, [])
             if agg_notes:
                 extra_lines.extend(agg_notes)
-            # 再尝试单组分KB注释（兜底）
             if not agg_notes:
                 note = self._val(4, f'notes_{route}', "")
                 if note and "待确认" not in note:
                     extra_lines.append(note)
             if extra_lines:
-                route_map[route] = route_map[route] + "\n\n" + "\n".join(f"- {n}" for n in extra_lines)
+                route_map[route] = base + "\n\n" + "\n".join(f"- {n}" for n in extra_lines)
+            else:
+                route_map[route] = base
 
-        inhalation, skin, eye, ingestion = (route_map[r] for r in ["inhalation", "skin", "eye", "ingestion"])
-
-        rescuer = "救援人员应佩戴适当的防护装备。避免直接接触。"
-        physician = "无特效解毒剂。对症治疗。"
+        rescuer = kb.get("rescuer", self._FIRST_AID_KB["general"]["rescuer"])
+        physician = kb.get("physician", self._FIRST_AID_KB["general"]["physician"])
 
         # 靶器官摘要（混合物模式）
         if getattr(self, '_is_mixture', False):
@@ -869,28 +994,97 @@ class SDSGenerator:
             if agg:
                 organs = agg.get_target_organs_summary()
                 if organs:
-                    physician = f"本品含特异性靶器官毒性组分（{organs}）。无特效解毒剂。对症治疗，注意监测相关器官功能。"
+                    physician = f"本品含特异性靶器官毒性组分（{organs}）。注意监测相关器官功能。" + \
+                               ("无特效解毒剂。对症治疗。" if "解毒" not in physician else "")
+
+        # 急性中毒症状（从KB毒理注释提取）
+        symptoms = self._val(11, 'notes_acute_symptoms', '')
+        symptoms_line = ""
+        if symptoms and "待确认" not in symptoms:
+            symptoms_line = f"\n\n**急性中毒症状**: {symptoms}"
 
         return (
             f"# 第四部分：急救措施\n\n"
-            f"**吸入**: {inhalation}\n\n"
-            f"**皮肤接触**: {skin}\n\n"
-            f"**眼睛接触**: {eye}\n\n"
-            f"**食入**: {ingestion}\n\n"
+            f"**吸入**: {route_map['inhalation']}\n\n"
+            f"**皮肤接触**: {route_map['skin']}\n\n"
+            f"**眼睛接触**: {route_map['eye']}\n\n"
+            f"**食入**: {route_map['ingestion']}\n"
+            f"{symptoms_line}\n\n"
             f"**救援人员防护**: {rescuer}\n\n"
             f"**对医生的提示**: {physician}"
         )
 
-    def generate_section_5(self) -> str:
-        """第五部分：消防措施"""
-        is_flammable = self._has_classification("易燃")
-        is_oxidizer = self._has_classification("氧化")
-        is_corrosive = self._has_classification("腐蚀")
+    # 消防知识库：按化学品类型提供特异性消防建议
+    _FIREFIGHTING_KB = {
+        "flammable_liquid": {
+            "hazard": "极易燃。其蒸气与空气可形成爆炸性混合物。蒸气比空气重，能沿地面扩散至远处，遇火源可能引起回燃。容器在火中可能破裂或爆炸。",
+            "media": "干粉、二氧化碳、泡沫、水雾。",
+            "prohibited": "禁止使用直流水（可能扩大火势和化学品扩散范围）。",
+            "advice": "消防人员必须佩戴自给式正压呼吸器，穿全身防火防毒服。尽可能将容器从火场移至空旷处。喷水保持火场容器冷却，直至灭火结束。处在火场中的容器若已变色或发出异常声响，必须马上撤离。",
+        },
+        "flammable_solid": {
+            "hazard": "遇明火、高热可燃。粉尘与空气可形成爆炸性混合物。",
+            "media": "干粉、干砂、二氧化碳。",
+            "prohibited": "禁止用水和泡沫灭火。",
+            "advice": "消防人员必须佩戴自给式呼吸器，穿全身防火服。禁止使用直流水。尽可能将容器从火场移至空旷处。",
+        },
+        "corrosive_acid": {
+            "hazard": "不燃。与金属反应可产生易燃的氢气。受热或遇水分解放出腐蚀性气体。容器在火中可能破裂。",
+            "media": "干粉、二氧化碳、干砂。",
+            "prohibited": "禁止用水直接喷射（可能导致酸液飞溅和扩散）。",
+            "advice": "消防人员必须佩戴自给式正压呼吸器，穿耐酸碱消防服。注意酸液飞溅。尽可能将容器从火场移至空旷处。",
+        },
+        "corrosive_alkali": {
+            "hazard": "不燃。遇水放出大量热。与酸类剧烈反应。受热分解产生腐蚀性烟雾。",
+            "media": "干粉、二氧化碳、干砂。",
+            "prohibited": "禁止用水直接喷射（可能剧烈放热和飞溅）。",
+            "advice": "消防人员必须佩戴自给式正压呼吸器，穿耐碱消防防护服。防止碱性溶液接触皮肤和眼睛。",
+        },
+        "oxidizer": {
+            "hazard": "强氧化剂。与可燃物接触可能引起燃烧。受热分解放出氧气，可加剧燃烧。容器在火中可能发生爆炸。",
+            "media": "大量水。",
+            "prohibited": "禁止使用干粉、泡沫（有机物成分可能与氧化剂反应）。",
+            "advice": "消防人员应佩戴自给式正压呼吸器，穿全身化学防护服。不要让氧化剂与可燃物接触。大量用水冷却容器。",
+        },
+        "compressed_gas": {
+            "hazard": "受热容器可能爆炸。泄漏气体可能造成窒息。某些气体可燃。",
+            "media": "适用周围火源的灭火剂。用水冷却容器。",
+            "prohibited": "禁止将水直接喷向泄漏源。",
+            "advice": "消防人员必须佩戴自给式正压呼吸器。如有可能，切断气源。如无法切断，让其燃尽。用水冷却周围容器。如在安全距离内感到容器震动或发出异常声响，立即撤离。",
+        },
+        "toxic": {
+            "hazard": "燃烧产生有毒气体。火灾产生的有毒燃烧产物可能危害消防人员和周围人群。",
+            "media": "干粉、二氧化碳、泡沫、水雾。",
+            "prohibited": "禁止使用直流水（可能扩大有毒物质扩散范围）。",
+            "advice": "消防人员必须佩戴自给式正压呼吸器，穿全身化学防护服。从上风方向灭火。防止灭火废水流入水体。火灾现场应设置警戒线。",
+        },
+        "general": {
+            "hazard": "参见具体化学品特性。",
+            "media": "干粉、二氧化碳、泡沫、砂土。",
+            "prohibited": "无特殊禁止要求。",
+            "advice": "消防人员必须佩戴防毒面具，穿全身消防服。尽可能将容器从火场移至空旷处。喷水保持火场容器冷却。",
+        },
+    }
 
-        hazard = "遇明火、高热可燃。" if is_flammable else \
-                 "强氧化剂，与可燃物接触可引起燃烧。" if is_oxidizer else \
-                 "不燃烧，但与金属反应可产生易燃气体。" if is_corrosive else \
-                 "参见具体化学品特性。 [待确认]"
+    def generate_section_5(self) -> str:
+        """第五部分：消防措施（基于化学品类型的特异性建议）"""
+        chem_types = self._get_chemical_types()
+
+        # 选择主要消防方案
+        type_priority = ["oxidizer", "compressed_gas", "corrosive_alkali", "corrosive_acid",
+                         "toxic", "flammable_solid", "flammable_liquid", "general"]
+        primary_type = "general"
+        for t in type_priority:
+            if t in chem_types:
+                primary_type = t
+                break
+
+        kb = self._FIREFIGHTING_KB.get(primary_type, self._FIREFIGHTING_KB["general"])
+
+        hazard = kb["hazard"]
+        media = kb["media"]
+        prohibited = kb["prohibited"]
+        advice = kb["advice"]
 
         # 混合物模式：聚合所有组分的消防注释和分解产物危害
         extra_hazard_lines = []
@@ -900,7 +1094,6 @@ class SDSGenerator:
                 ff_notes = agg.get_firefighting_notes()
                 extra_hazard_lines.extend(ff_notes)
         else:
-            # 纯物质：注入KB消防注释
             ff_notes = self._val(5, 'notes', '')
             if ff_notes and "待确认" not in ff_notes:
                 extra_hazard_lines.append(ff_notes)
@@ -908,16 +1101,16 @@ class SDSGenerator:
         if extra_hazard_lines:
             hazard += "\n" + "\n".join(f"- {n}" for n in extra_hazard_lines)
 
-        media = "干粉、二氧化碳、泡沫、砂土。"
-        prohibited = self._val(5, 'prohibited_media', '')
-        if prohibited and "待确认" not in prohibited:
-            pass  # use KB value
-        elif is_flammable and self._has_classification("金属"):
-            prohibited = "严禁用水。"
-        else:
-            prohibited = "无特殊禁止要求。"
+        # KB数据覆盖
+        kb_prohibited = self._val(5, 'prohibited_media', '')
+        if kb_prohibited and "待确认" not in kb_prohibited:
+            prohibited = kb_prohibited
 
-        advice = "消防人员必须佩戴防毒面具，穿全身消防服。尽可能将容器从火场移至空旷处。喷水保持火场容器冷却。"
+        # 分解产物
+        decomp = self._val(10, 'hazardous_decomposition', '')
+        decomp_line = ""
+        if decomp and "待确认" not in decomp:
+            decomp_line = f"\n\n**燃烧/分解产物**: {decomp}"
 
         return (
             f"# 第五部分：消防措施\n\n"
@@ -925,6 +1118,7 @@ class SDSGenerator:
             f"**适用灭火剂**: {media}\n\n"
             f"**禁止使用的灭火剂**: {prohibited}\n\n"
             f"**消防建议**: {advice}"
+            f"{decomp_line}"
         )
 
     def generate_section_6(self) -> str:
@@ -999,21 +1193,53 @@ class SDSGenerator:
             f"**参考**: 参见第八部分和第十三部分。"
         )
 
+    # 操作储存知识库
+    _HANDLING_KB = {
+        "flammable_liquid": {
+            "handling": "密闭操作，全面通风。操作人员必须经过专门培训，严格遵守操作规程。建议操作人员佩戴过滤式防毒面具（半面罩），戴化学安全防护眼镜，穿防静电工作服，戴橡胶耐油手套。远离火种、热源，工作场所严禁吸烟。使用防爆型的通风系统和设备。防止蒸气泄漏到工作场所空气中。避免与氧化剂、酸类、碱金属接触。灌装时应控制流速，且有接地装置，防止静电积聚。搬运时轻装轻卸，防止包装及容器损坏。配备相应品种和数量的消防器材及泄漏应急处理设备。",
+            "storage": "储存于阴凉、通风的专用库房内。远离火种、热源。库温不宜超过37°C，相对湿度不超过80%。保持容器密封。应与氧化剂、还原剂、碱类、食用化学品分开存放，切忌混储。采用防爆型照明、通风设施。禁止使用易产生火花的机械设备和工具。储存区应备有泄漏应急处理设备和合适的收容材料。",
+        },
+        "corrosive_acid": {
+            "handling": "密闭操作，注意通风。操作尽可能机械化、自动化。操作人员必须经过专门培训，严格遵守操作规程。建议操作人员佩戴头罩型电动送风过滤式防尘呼吸器，穿橡胶耐酸碱服，戴橡胶耐酸碱手套。远离易燃、可燃物。避免产生酸雾。防止蒸气释放到工作场所空气中。避免与碱类、胺类、碱金属接触。搬运时要轻装轻卸，防止包装及容器损坏。配备泄漏应急处理设备。倒空的容器可能残留有害物。",
+            "storage": "储存于阴凉、通风的库房。库温不超过30°C，相对湿度不超过85%。保持容器密封。应与碱类、胺类、碱金属、易燃物、可燃物分开存放，切忌混储。储区应备有泄漏应急处理设备和合适的收容材料。耐酸地坪。",
+        },
+        "corrosive_alkali": {
+            "handling": "密闭操作。操作人员必须经过专门培训，严格遵守操作规程。建议操作人员佩戴头罩型电动送风过滤式防尘呼吸器，穿橡胶耐酸碱服，戴橡胶耐酸碱手套。避免产生粉尘和气溶胶。避免与酸类接触。搬运时要轻装轻卸，防止包装及容器损坏。配备泄漏应急处理设备。注意防止包装破损。倒空的容器可能残留有害物。",
+            "storage": "储存于阴凉、干燥、通风良好的库房。远离火种、热源。包装必须密封，切勿受潮。应与易燃物、可燃物、酸类等分开存放，切忌混储。储区应备有合适的收容材料。",
+        },
+        "toxic": {
+            "handling": "严加密闭，提供充分的局部排风和全面通风。操作人员必须经过专门培训，严格遵守操作规程。建议操作人员佩戴过滤式防毒面具（全面罩），穿胶布防毒衣，戴橡胶手套。远离火种、热源，工作场所严禁吸烟。使用防爆型的通风系统和设备。防止蒸气泄漏到工作场所空气中。避免与氧化剂、酸类、碱类接触。搬运时要轻装轻卸，防止包装及容器损坏。配备泄漏应急处理设备。",
+            "storage": "储存于阴凉、通风的库房内。远离火种、热源。保持容器密封。应与氧化剂、酸类、碱类、食用化学品分开存放，切忌混储。采用防爆型照明。禁止使用易产生火花的机械设备和工具。储区应备有泄漏应急处理设备和合适的收容材料。",
+        },
+        "compressed_gas": {
+            "handling": "密闭操作，提供良好的自然通风条件。操作人员必须经过专门培训，严格遵守操作规程。远离火种、热源，工作场所严禁吸烟。搬运时轻装轻卸，防止钢瓶及附件破损。配备泄漏应急处理设备。",
+            "storage": "储存于阴凉、通风的库房。远离火种、热源。库温不宜超过30°C。应与易燃物、可燃物分开存放。储区应备有泄漏应急处理设备。气瓶应直立放置，固定牢靠。",
+        },
+        "oxidizer": {
+            "handling": "密闭操作，加强通风。操作人员必须经过专门培训，严格遵守操作规程。远离火种、热源，工作场所严禁吸烟。远离易燃、可燃物。避免产生粉尘。避免与还原剂、酸类、金属粉末接触。搬运时要轻装轻卸，防止包装及容器损坏。注意防止包装破损。",
+            "storage": "储存于阴凉、通风的库房。远离火种、热源。库温不超过30°C，相对湿度不超过80%。包装密封。应与易燃物、可燃物、还原剂、酸类、金属粉末等分开存放，切忌混储。储区应备有合适的收容材料。禁止使用易产生火花的机械设备和工具。",
+        },
+        "general": {
+            "handling": "密闭操作，注意通风。操作人员必须经过专门培训，严格遵守操作规程。建议操作人员佩戴防护眼镜和手套。避免吸入蒸气。避免与皮肤和眼睛接触。",
+            "storage": "储存于阴凉、通风的库房内。远离火种、热源。保持容器密封。应与氧化剂分开存放，切忌混储。",
+        },
+    }
+
     def generate_section_7(self) -> str:
-        """第七部分：操作处置与储存"""
-        is_flammable = self._has_classification("易燃")
-        is_corrosive = self._has_classification("腐蚀")
-        is_toxic = self._has_classification("急性毒性")
+        """第七部分：操作处置与储存（基于化学品类型的特异性建议）"""
+        chem_types = self._get_chemical_types()
 
-        handling = "密闭操作，局部排风。" + \
-                   ("远离火源和热源。使用防爆设备。" if is_flammable else "") + \
-                   ("避免接触皮肤和眼睛。" if is_corrosive else "") + \
-                   ("操作人员必须经过专门培训，严格遵守操作规程。" if is_toxic else "")
+        type_priority = ["corrosive_alkali", "corrosive_acid", "toxic", "compressed_gas",
+                         "oxidizer", "flammable_liquid", "general"]
+        primary_type = "general"
+        for t in type_priority:
+            if t in chem_types:
+                primary_type = t
+                break
 
-        storage = "储存于阴凉、干燥、通风良好的地方。保持容器密闭。" + \
-                  ("远离火源和热源。与氧化剂分开存放。" if is_flammable else "") + \
-                  ("储存于耐腐蚀容器中。" if is_corrosive else "")
-
+        kb = self._HANDLING_KB.get(primary_type, self._HANDLING_KB["general"])
+        handling = kb["handling"]
+        storage = kb["storage"]
         incompatibles = self._val(10, 'incompatible_materials', '强氧化剂、强酸、强碱 [待确认]')
 
         return (
@@ -1085,16 +1311,118 @@ class SDSGenerator:
             f"| 辛醇/水分配系数 | {self._val(9, 'partition_coefficient', '无可用数据 [待确认]')} |"
         )
 
+    def _infer_decomposition_products(self) -> str:
+        """从分子式推断可能的危险分解产物"""
+        formula = str(getattr(self, '_kb_data', {}).get("molecular_formula", ""))
+        products = []
+        if not formula:
+            return ""
+
+        elements = set()
+        # 简单元素检测（处理常见化学式）
+        if "C" in formula and "H" in formula:
+            elements.add("碳氢")
+        if "N" in formula:
+            elements.add("氮")
+        if "S" in formula:
+            elements.add("硫")
+        if "Cl" in formula:
+            elements.add("氯")
+        if "F" in formula:
+            elements.add("氟")
+        if "Br" in formula:
+            elements.add("溴")
+        if "CN" in formula or (formula.count("C") >= 1 and "N" in formula):
+            elements.add("氰")
+        if "P" in formula and "O" in formula:
+            elements.add("磷")
+        # 金属
+        for metal in ["Pb", "Hg", "Cd", "Cr", "Cu", "Zn", "Ni", "Al", "Fe", "Na", "K", "Ca", "Mg"]:
+            if metal in formula:
+                elements.add("金属")
+                break
+
+        if "碳氢" in elements:
+            products.append("一氧化碳")
+            products.append("二氧化碳")
+        if "氮" in elements:
+            products.append("氮氧化物")
+        if "硫" in elements:
+            products.append("二氧化硫")
+        if "氯" in elements:
+            products.append("氯化氢")
+        if "氟" in elements:
+            products.append("氟化氢")
+        if "溴" in elements:
+            products.append("溴化氢")
+        if "氰" in elements and "碳氢" not in elements:
+            products.append("氰化氢")
+        if "磷" in elements:
+            products.append("磷氧化物")
+        if "金属" in elements:
+            products.append("金属氧化物")
+
+        if products:
+            return "、".join(products)
+        return ""
+
     def generate_section_10(self) -> str:
         """第十部分：稳定性和反应性"""
-        decomp = self._val(10, 'hazardous_decomposition', '一氧化碳、二氧化碳及其他有害气体。 [待确认]')
+        # 稳定性：检查是否有不稳定分类
+        stability = "在正常储存和操作条件下稳定。"
+        if self._has_classification("自反应") or self._has_classification("爆炸"):
+            stability = "不稳定，受热、摩擦或撞击可能发生分解。"
+
+        # 应避免的条件
+        conditions = self._val(10, 'conditions_to_avoid', '明火、高热。 [待确认]')
+
+        # 禁配物
+        incompatibles = self._val(10, 'incompatible_materials', '强氧化剂、强酸、强碱 [待确认]')
+
+        # 危险分解产物：优先KB数据，否则从分子式推断
+        decomp = self._val(10, 'hazardous_decomposition', '')
+        if not decomp or "待确认" in decomp:
+            inferred = self._infer_decomposition_products()
+            if inferred:
+                decomp = f"{inferred}（推断值）"
+            else:
+                decomp = "无可用数据 [待确认]"
+
+        # 聚合危害
+        polymerization = "不会发生危险的聚合反应。"
+        if self._has_classification("自反应") or self._has_classification("有机过氧化物"):
+            polymerization = "可能发生危险的聚合反应。"
+
         return (
             f"# 第十部分：稳定性和反应性\n\n"
-            f"**稳定性**: 在正常储存和操作条件下稳定。\n\n"
-            f"**应避免的条件**: {self._val(10, 'conditions_to_avoid', '明火、高热。 [待确认]')}\n\n"
-            f"**禁配物**: {self._val(10, 'incompatible_materials', '强氧化剂、强酸、强碱 [待确认]')}\n\n"
-            f"**危险分解产物**: {decomp}"
+            f"**稳定性**: {stability}\n\n"
+            f"**应避免的条件**: {conditions}\n\n"
+            f"**禁配物**: {incompatibles}\n\n"
+            f"**危险分解产物**: {decomp}\n\n"
+            f"**聚合危害**: {polymerization}"
         )
+
+    # 毒理学症状知识库：基于GHS分类自动推断主要症状
+    _TOX_SYMPTOMS_KB = {
+        "急性毒性-经口": "误食可引起恶心、呕吐、腹痛。严重时可导致意识障碍、呼吸困难、器官损伤。",
+        "急性毒性-经皮": "皮肤接触可引起刺激、红肿。大面积接触可导致系统性中毒。",
+        "急性毒性-吸入": "吸入蒸气或雾可引起呼吸道刺激、咳嗽、呼吸困难。高浓度暴露可导致头晕、头痛、恶心，严重时可引起意识丧失。",
+        "皮肤腐蚀": "接触可引起皮肤严重灼伤和坏死。疼痛剧烈，愈合缓慢，可能留疤。",
+        "皮肤刺激": "接触可引起皮肤红斑、瘙痒、脱脂。反复接触可引起皮肤干燥、皲裂。",
+        "严重眼损伤": "接触可引起严重的角膜损伤，可能造成不可逆的视力损害甚至失明。",
+        "眼刺激": "接触可引起眼睛发红、疼痛、流泪。蒸气也可引起刺激。",
+        "致突变": "根据现有数据，该物质可能引起遗传物质损伤。",
+        "致癌": "根据现有数据，该物质怀疑或确认具有致癌性。",
+        "生殖毒性": "根据现有数据，该物质可能对生育能力或胎儿造成损害。",
+        "STOT-单次-麻醉": "可引起嗜睡、眩晕、反应迟钝。高浓度暴露可导致意识丧失。",
+        "STOT-单次-呼吸道": "可引起呼吸道刺激、咳嗽、呼吸困难。可能引起肺水肿（延迟发作）。",
+        "STOT-反复-肝": "长期或反复接触可引起肝脏损害。表现为肝功能异常、黄疸等。",
+        "STOT-反复-肾": "长期或反复接触可引起肾脏损害。表现为肾功能异常、蛋白尿等。",
+        "STOT-反复-血液": "长期或反复接触可引起血液系统损害。表现为贫血、白细胞减少等。",
+        "STOT-反复-神经": "长期或反复接触可引起神经系统损害。表现为感觉异常、运动障碍等。",
+        "吸入危害": "低粘度液体如误吸进入呼吸道，可引起化学性肺炎，严重时可致命。",
+        "致敏": "接触可引起皮肤过敏反应。致敏后，极少量接触也可引发过敏反应。",
+    }
 
     def generate_section_11(self) -> str:
         """第十一部分：毒理学信息"""
@@ -1104,7 +1432,19 @@ class SDSGenerator:
             val = self._val(11, key, "无可用数据 [待确认]")
             return f"**{label}**: {val}"
 
-        # 毒理定性注释
+        # 基于GHS分类自动推断症状描述
+        symptom_lines = []
+        for cls in getattr(self, '_classifications', []):
+            hazard = cls.get("hazard", "")
+            for key, desc in self._TOX_SYMPTOMS_KB.items():
+                # 模糊匹配分类名
+                key_parts = key.replace("STOT-", "").replace("单次", "").replace("反复", "").split("-")
+                if any(kp in hazard for kp in key_parts if len(kp) > 1):
+                    if desc not in symptom_lines:
+                        symptom_lines.append(desc)
+                    break
+
+        # KB毒理注释
         notes_lines = []
         for note_key, label in [("notes_acute_symptoms", "急性中毒症状"),
                                   ("notes_chronic_effects", "慢性影响"),
@@ -1113,6 +1453,25 @@ class SDSGenerator:
             note_val = self._val(11, note_key, "")
             if note_val and "待确认" not in note_val:
                 notes_lines.append(f"**{label}**: {note_val}")
+
+        # 自动推断的吸入危害
+        aspiration = self._val(11, 'aspiration_hazard', '')
+        if "待确认" in aspiration:
+            # 低粘度有机液体自动标注
+            kb = getattr(self, '_kb_data', {})
+            formula = str(kb.get("molecular_formula", ""))
+            bp = str(kb.get("boiling_point", ""))
+            if "C" in formula and "H" in formula:
+                try:
+                    bp_num = float(re.search(r'-?[\d.]+', bp).group())
+                    if bp_num > 0 and bp_num < 300:  # 低沸点有机液体
+                        aspiration = "低粘度有机液体，误吸可引起化学性肺炎。（推断值）"
+                except (ValueError, AttributeError):
+                    pass
+
+        symptoms_text = ""
+        if symptom_lines:
+            symptoms_text = f"**可能的主要症状和影响**:\n" + "\n".join(f"- {s}" for s in symptom_lines) + "\n\n"
 
         notes_text = ("\n\n".join(notes_lines) + "\n\n") if notes_lines else ""
 
@@ -1128,7 +1487,8 @@ class SDSGenerator:
             f"{tox_field('reproductive_toxicity_category', '生殖毒性')}\n\n"
             f"{tox_field('stot_single_exposure', '特异性靶器官毒性-单次接触')}\n\n"
             f"{tox_field('stot_repeated_exposure', '特异性靶器官毒性-反复接触')}\n\n"
-            f"{tox_field('aspiration_hazard', '吸入危害')}\n\n"
+            f"**吸入危害**: {aspiration if aspiration else self._val(11, 'aspiration_hazard')}\n\n"
+            f"{symptoms_text}"
             f"{notes_text}"
         )
 
@@ -1161,13 +1521,78 @@ class SDSGenerator:
             f"**土壤中的迁移性**: {self._val(12, 'mobility_in_soil', '无可用数据 [待确认]')}"
         )
 
+    # 废弃处置知识库
+    _DISPOSAL_KB = {
+        "flammable_liquid": {
+            "method": "焚烧处理。焚烧炉应配备洗涤器和粉尘捕集装置，确保尾气达标排放。严禁倒入下水道。委托有资质的危险废物处理单位处理。",
+            "container": "将废弃容器交由有资质的危险废物处理单位处理。容器倒空后可能仍有残留液体和易燃蒸气，应保持通风，远离火源。不得切割、焊接空容器。",
+            "regulation": "《国家危险废物名录》HW06（有机溶剂废物）或HW42（废有机溶剂）。",
+            "note": "处置过程中应遵守《危险废物转移联单管理办法》。防止废物与不相容物质混合。",
+        },
+        "corrosive_acid": {
+            "method": "缓慢加入大量水中，用碱中和至pH 6-9后排入废水系统（须取得环保部门许可）。或交由有资质的危险废物处理单位处理。严禁直接排放。",
+            "container": "空容器应用水彻底清洗三次以上，清洗液按废液处理。中和后可回收利用或按相关规定处置。不得将废酸倒入金属容器中。",
+            "regulation": "《国家危险废物名录》HW34（废酸）。",
+            "note": "中和处理应缓慢进行，避免剧烈反应产生大量热量。操作人员应穿戴防护装备。",
+        },
+        "corrosive_alkali": {
+            "method": "缓慢加入大量水中，用酸中和至pH 6-9后排入废水系统（须取得环保部门许可）。或交由有资质的危险废物处理单位处理。严禁直接排放。",
+            "container": "空容器应用水彻底清洗三次以上，清洗液按废液处理。中和后可回收利用或按相关规定处置。",
+            "regulation": "《国家危险废物名录》HW35（废碱）。",
+            "note": "中和处理应缓慢进行，避免剧烈放热。操作人员应穿戴防护装备。",
+        },
+        "toxic": {
+            "method": "用焚烧法或化学法处理。含卤素有机物焚烧需配备高效洗涤器。不得与一般废物混合。委托有资质的危险废物处理单位处理。",
+            "container": "废弃容器按危险废物管理，交由有资质单位处理。不得作为普通废金属回收。容器上应保持危险废物标签。",
+            "regulation": "按具体成分确定危险废物类别。须执行《危险废物转移联单管理办法》。",
+            "note": "处置过程中应防止有毒物质扩散。操作人员必须穿戴适当的防护装备。",
+        },
+        "heavy_metal": {
+            "method": "不得焚烧（会造成重金属大气污染）。应进行稳定化/固化处理后安全填埋。含重金属废液应先沉淀处理，上清液达标后排放，沉淀物按危险废物处置。",
+            "container": "容器不可回收利用。按危险废物处置。残留物中含有重金属，不得随意丢弃。",
+            "regulation": "《国家危险废物名录》HW48（含铜废物）/HW49（含铅废物）/HW50（含汞废物）等，按实际成分确定。",
+            "note": "含重金属废物属于持久性污染物，必须确保最终处置安全。禁止稀释排放。",
+        },
+        "oxidizer": {
+            "method": "根据化学品性质，可选择化学还原处理后按一般废物处置，或交由有资质的危险废物处理单位处理。禁止与还原剂、可燃物混合处置。",
+            "container": "彻底清洗后回收利用或按相关规定处置。清洗液需经处理达标后排放。",
+            "regulation": "按具体成分确定危险废物类别。",
+            "note": "处置时注意氧化性物质与有机物的反应风险。",
+        },
+        "compressed_gas": {
+            "method": "残气应通过安全方式（如通风橱）缓慢排放至大气中，或用适当溶液吸收后处理。钢瓶返回供应商或交由有资质单位处理。",
+            "container": "钢瓶返回供应商。不得随意切割或破坏钢瓶。",
+            "regulation": "按气体具体成分确定废物类别。",
+            "note": "排放前确认气体性质，确保安全。有毒气体不得直接排放至大气中。",
+        },
+        "general": {
+            "method": "按照国家和地方相关法规要求进行处置。委托有资质的危险废物处理单位处理。",
+            "container": "废弃容器应用水彻底清洗后回收或按相关规定处置。",
+            "regulation": "按照《中华人民共和国固体废物污染环境防治法》执行。",
+            "note": "处置过程中应遵守相关环保法规，防止环境污染。",
+        },
+    }
+
     def generate_section_13(self) -> str:
-        """第十三部分：废弃处置"""
+        """第十三部分：废弃处置（基于化学品类型的特异性建议）"""
+        chem_types = self._get_chemical_types()
+
+        type_priority = ["heavy_metal", "corrosive_alkali", "corrosive_acid", "toxic",
+                         "oxidizer", "compressed_gas", "flammable_liquid", "general"]
+        primary_type = "general"
+        for t in type_priority:
+            if t in chem_types:
+                primary_type = t
+                break
+
+        kb = self._DISPOSAL_KB.get(primary_type, self._DISPOSAL_KB["general"])
+
         return (
             f"# 第十三部分：废弃处置\n\n"
-            f"**处置方法**: 按照国家和地方相关法规要求进行处置。委托有资质的危险废物处理单位处理。\n\n"
-            f"**容器处理**: 废弃容器应用水彻底清洗后回收或按相关规定处置。\n\n"
-            f"**注意事项**: 处置过程中应遵守相关环保法规，防止环境污染。"
+            f"**处置方法**: {kb['method']}\n\n"
+            f"**容器处理**: {kb['container']}\n\n"
+            f"**适用的法规**: {kb['regulation']}\n\n"
+            f"**注意事项**: {kb['note']}"
         )
 
     def generate_section_14(self) -> str:
