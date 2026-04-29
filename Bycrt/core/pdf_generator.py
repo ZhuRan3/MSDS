@@ -18,8 +18,17 @@ MD -> PDF 转换模块（仿真实 MSDS 排版）
 
 import re
 import sys
+import hashlib
 from pathlib import Path
 from typing import List, Tuple
+
+# 修复 Python 3.8 的 hashlib.md5 不支持 usedforsecurity 参数
+# reportlab 内部调用 md5(data, usedforsecurity=False)
+if not hasattr(hashlib, '_orig_md5'):
+    _orig_md5 = hashlib.md5
+    def _patched_md5(data=b'', usedforsecurity=True):
+        return _orig_md5(data)
+    hashlib.md5 = _patched_md5
 
 # ============================================================
 # 常量
@@ -38,6 +47,44 @@ _CLR_SUBTITLE_FG  = (0x00, 0x00, 0x00)   # 子标题黑色字
 _CLR_TBL_BORDER   = (0x66, 0x66, 0x66)   # 表格边框灰
 _CLR_TBL_HDR_BG   = (0xE8, 0xE8, 0xE8)   # 表头浅灰背景
 _CLR_KV_LINE      = (0xCC, 0xCC, 0xCC)   # KV 行分隔线
+
+# GHS 象形图参数
+_GHS_PICT_SIZE = 48  # PDF 中显示的像素大小（points）
+_GHS_ASSETS_DIR = Path(__file__).parent.parent / "assets" / "ghs"
+
+# ============================================================
+# GHS 象形图（PNG 图片嵌入）
+# ============================================================
+
+def _get_ghs_image(code, size=_GHS_PICT_SIZE):
+    """获取 GHS 象形图 Image flowable（从 PNG 文件加载）"""
+    from reportlab.platypus import Image as RLImage
+    png_path = _GHS_ASSETS_DIR / f"{code}.png"
+    if png_path.exists():
+        return RLImage(str(png_path), width=size, height=size)
+    return _create_ghs_pictogram_fallback(code, size)
+
+def _create_ghs_pictogram_fallback(code, size=_GHS_PICT_SIZE):
+    """PNG 文件不存在时的回退：reportlab Drawing"""
+    from reportlab.graphics.shapes import Drawing, Polygon, String
+    from reportlab.lib.colors import Color
+    red = Color(0xC0/255, 0, 0)
+    white = Color(1, 1, 1)
+    black = Color(0, 0, 0)
+    d = Drawing(size, size)
+    cx, cy = size/2, size/2
+    pad = 3
+    half = (size - 2*pad) / 2
+    diamond = Polygon(
+        points=[cx, cy+half, cx+half, cy, cx, cy-half, cx-half, cy],
+        fillColor=white, strokeColor=red, strokeWidth=2.0)
+    d.add(diamond)
+    d.add(String(cx-10, cy-4, code, fontSize=6, fillColor=black, fontName='Helvetica'))
+    return d
+
+def _parse_pictogram_codes(value):
+    """从象形图文本提取 [(code, 中文名), ...]"""
+    return re.findall(r'(GHS\d\d)\s*\(([^)]+)\)', value)
 
 
 # ============================================================
@@ -513,6 +560,58 @@ def generate_pdf(md_content: str, output_path: str, title: str = "SDS") -> str:
         # ==============================================================
         elif btype == "kv_line":
             lbl = _sanitize_for_para(block["label"])
+
+            # ---- 象形图特殊渲染：图像 + 文字 ----
+            if block["label"].strip() == "象形图":
+                pict_pairs = _parse_pictogram_codes(block["value"])
+                if pict_pairs:
+                    style_pict_label = ParagraphStyle(
+                        'PictLabel', fontName=FONT, fontSize=7, leading=10,
+                        alignment=TA_CENTER, wordWrap='CJK')
+                    pict_cells = []
+                    for code, cn_name in pict_pairs:
+                        pict_img = _get_ghs_image(code)
+                        mini_data = [
+                            [pict_img],
+                            [Paragraph(f'{code}<br/>({cn_name})', style_pict_label)],
+                        ]
+                        mini_w = _GHS_PICT_SIZE + 4
+                        mini_t = Table(mini_data, colWidths=[mini_w])
+                        mini_t.setStyle(TableStyle([
+                            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                            ('LEFTPADDING', (0, 0), (-1, -1), 1),
+                            ('RIGHTPADDING', (0, 0), (-1, -1), 1),
+                            ('TOPPADDING', (0, 0), (-1, -1), 1),
+                            ('BOTTOMPADDING', (0, 0), (-1, -1), 1),
+                        ]))
+                        pict_cells.append(mini_t)
+
+                    # 主行：标签 + 象形图
+                    pict_row = [[
+                        Paragraph(f'<b>{lbl}</b>', style_kv_label),
+                    ] + pict_cells]
+                    col_widths = [INDENT_W * 0.25] + [mini_w] * len(pict_cells)
+                    pict_table = Table(pict_row, colWidths=col_widths)
+                    pict_table.setStyle(TableStyle([
+                        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                        ('LEFTPADDING', (0, 0), (0, 0), 0),
+                        ('RIGHTPADDING', (0, 0), (-1, -1), 0),
+                        ('TOPPADDING', (0, 0), (-1, -1), 0.5 * mm),
+                        ('BOTTOMPADDING', (0, 0), (-1, -1), 0.5 * mm),
+                    ]))
+                    wrap = Table([[Spacer(1, 0), pict_table]], colWidths=[INDENT, INDENT_W])
+                    wrap.setStyle(TableStyle([
+                        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+                        ('LEFTPADDING', (0, 0), (-1, -1), 0),
+                        ('RIGHTPADDING', (0, 0), (-1, -1), 0),
+                        ('TOPPADDING', (0, 0), (-1, -1), 0),
+                        ('BOTTOMPADDING', (0, 0), (-1, -1), 0),
+                    ]))
+                    elements.append(wrap)
+                    continue
+
+            # ---- 普通 KV 行渲染 ----
             val = _sanitize_for_para(block["value"])
             val = _highlight_review(val)
             kv_w_label = INDENT_W * 0.25
