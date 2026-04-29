@@ -328,6 +328,8 @@ class EvidenceRetriever:
             ("xlogp", "xlogp"),                       # KB存xlogp (辛醇水分配系数)
             ("appearance", "appearance"),
             ("odor", "odor"),
+            ("ph_value", "ph_value"),
+            ("decomposition_temperature", "decomposition_temperature"),
         ]
         for data_key, field_name in phys_field_aliases:
             val = data.get(data_key)
