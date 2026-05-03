@@ -19,6 +19,7 @@ python mixture_calculator.py --components "乙醇:64-17-5:30" "甲醇:67-56-1:30
 import json
 import sys
 import math
+import re
 import argparse
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -302,8 +303,11 @@ class MixtureCalculator:
                     "threshold": threshold,
                     "route": route,
                 }
+                # 路由名称中文映射
+                _route_cn = {"oral": "经口", "dermal": "经皮", "inhalation": "吸入"}
+                route_cn = _route_cn.get(route, route)
                 return {
-                    "hazard": f"急性毒性-{route} Cat {cat}",
+                    "hazard": f"急性毒性-{route_cn}，类别{cat}",
                     "category": cat,
                     "h_code": info.get("h_code", ""),
                     "signal": info.get("signal", "警告"),
@@ -340,7 +344,7 @@ class MixtureCalculator:
 
         if cat1_conc >= 5.0:
             results.append({
-                "hazard": "皮肤腐蚀 Cat 1",
+                "hazard": "皮肤腐蚀/刺激，类别1",
                 "h_code": "H314",
                 "signal": "危险",
                 "reason": f"皮肤腐蚀Cat1组分总浓度{cat1_conc:.1f}%≥5%",
@@ -350,7 +354,7 @@ class MixtureCalculator:
             self.result.calculation_log.append(f"  → 皮肤腐蚀Cat1组分总浓度{cat1_conc:.1f}%≥5% → Cat 1")
         elif cat1_conc >= 1.0:
             results.append({
-                "hazard": "皮肤刺激 Cat 2",
+                "hazard": "皮肤腐蚀/刺激，类别2",
                 "h_code": "H315",
                 "signal": "警告",
                 "reason": f"皮肤腐蚀Cat1组分总浓度{cat1_conc:.1f}%≥1%但<5%",
@@ -361,7 +365,7 @@ class MixtureCalculator:
 
         if cat2_conc >= 10.0:
             results.append({
-                "hazard": "皮肤刺激 Cat 2",
+                "hazard": "皮肤腐蚀/刺激，类别2",
                 "h_code": "H315",
                 "signal": "警告",
                 "reason": f"皮肤刺激Cat2组分总浓度{cat2_conc:.1f}%≥10%",
@@ -405,7 +409,7 @@ class MixtureCalculator:
 
         if cat1_conc >= 3.0:
             results.append({
-                "hazard": "严重眼损伤 Cat 1",
+                "hazard": "严重眼损伤/眼刺激，类别1",
                 "h_code": "H318",
                 "signal": "危险",
                 "reason": f"严重眼损伤Cat1组分总浓度{cat1_conc:.1f}%≥3%",
@@ -416,7 +420,7 @@ class MixtureCalculator:
 
         if cat2a_conc >= 10.0:
             results.append({
-                "hazard": "眼刺激 Cat 2A",
+                "hazard": "严重眼损伤/眼刺激，类别2A",
                 "h_code": "H319",
                 "signal": "警告",
                 "reason": f"眼刺激Cat2A组分总浓度{cat2a_conc:.1f}%≥10%",
@@ -426,7 +430,7 @@ class MixtureCalculator:
             self.result.calculation_log.append(f"  → 眼刺激Cat2A组分总浓度{cat2a_conc:.1f}%≥10% → Cat 2A")
         elif cat2a_conc >= 1.0 and not results:
             results.append({
-                "hazard": "眼刺激 Cat 2A（考虑分类）",
+                "hazard": "严重眼损伤/眼刺激，类别2A（考虑分类）",
                 "h_code": "H319",
                 "signal": "警告",
                 "reason": f"眼刺激Cat2A组分总浓度{cat2a_conc:.1f}%≥1%但<10%，需进一步评估",
@@ -460,8 +464,13 @@ class MixtureCalculator:
                         triggering.append(f"{c.name}({c.concentration}%)")
 
             if total_conc >= cut_off:
+                # 标准化hazard名称为中文GHS格式
+                display_name = hazard_type
+                display_name = display_name.replace(" Cat ", "，类别")
+                display_name = display_name.replace("STOT-单次", "特异性靶器官毒性-一次接触")
+                display_name = display_name.replace("STOT-反复", "特异性靶器官毒性-反复接触")
                 results.append({
-                    "hazard": hazard_type,
+                    "hazard": display_name,
                     "h_code": h_code,
                     "signal": "危险" if "Cat 1" in hazard_type else "警告",
                     "reason": f"总浓度{total_conc:.1f}%≥{cut_off}% (触发组分: {', '.join(triggering)})",
@@ -537,20 +546,20 @@ class MixtureCalculator:
                 # Cat 1: 闪点<23°C 且 初沸点<=35°C (H224)
                 # Cat 2: 闪点<23°C 且 初沸点>35°C  (H225)
                 if ibp_val is not None and ibp_val <= 35:
-                    classification = "易燃液体 Cat 1"
+                    classification = "易燃液体，类别1"
                     h_code = "H224"
                     ibp_note = f"，初沸点{ibp_val}°C<=35°C"
                 else:
-                    classification = "易燃液体 Cat 2"
+                    classification = "易燃液体，类别2"
                     h_code = "H225"
                     ibp_note = (f"，初沸点{ibp_val}°C>35°C" if ibp_val is not None
                                 else "，初沸点数据缺失，默认Cat2")
             elif min_fp[1] < 60:
-                classification = "易燃液体 Cat 3"
+                classification = "易燃液体，类别3"
                 h_code = "H226"
                 ibp_note = ""
             else:
-                classification = "易燃液体 Cat 4" if min_fp[1] <= 93 else ""
+                classification = "易燃液体，类别4" if min_fp[1] <= 93 else ""
                 h_code = "H227" if min_fp[1] <= 93 else ""
                 ibp_note = ""
 
@@ -569,7 +578,7 @@ class MixtureCalculator:
 
         # 有易燃组分但无闪点数据
         return {
-            "hazard": "易燃液体（需进一步确认分类）",
+            "hazard": "易燃液体（需进一步确认分类）",  # noqa: 保留待确认标记
             "h_code": "H225/H226",
             "signal": "危险",
             "reason": f"易燃组分总浓度{flammable_conc:.1f}%≥10%，但缺少闪点数据",
@@ -649,6 +658,10 @@ class MixtureCalculator:
                     f"  {bp['principle']}: 适用={bp['applicable']}, {bp.get('note', '')}"
                 )
 
+        # GHS分类覆盖规则：高等级覆盖低等级
+        # Cat1覆盖Cat2A（眼损伤），Cat1覆盖Cat2（皮肤腐蚀）
+        self._apply_classification_hierarchy()
+
         # 汇总
         self._summarize()
 
@@ -713,7 +726,7 @@ class MixtureCalculator:
         # 长期危害判定
         if long_cat1_sum >= 0.1:
             results.append({
-                "hazard": "危害水生环境-长期 Cat 1",
+                "hazard": "危害水生环境-长期危害，类别1",
                 "h_code": "H410",
                 "signal": "警告",
                 "reason": f"Σ(Ci×Mi)/100={long_cat1_sum:.3f}>=0.1",
@@ -724,7 +737,7 @@ class MixtureCalculator:
             self.result.calculation_log.append(f"  -> 长期Cat1 (Σ={long_cat1_sum:.3f}>=0.1)")
         elif long_cat1_sum >= 0.01 or long_cat2_sum >= 0.25:
             results.append({
-                "hazard": "危害水生环境-长期 Cat 2",
+                "hazard": "危害水生环境-长期危害，类别2",
                 "h_code": "H411",
                 "signal": "警告",
                 "reason": f"Cat1加权Σ={long_cat1_sum:.3f}，Cat2加权Σ={long_cat2_sum:.3f}",
@@ -738,7 +751,7 @@ class MixtureCalculator:
         # 急性危害判定
         if acute_cat1_sum >= 0.25:
             results.append({
-                "hazard": "危害水生环境-急性 Cat 1",
+                "hazard": "危害水生环境-急性危害，类别1",
                 "h_code": "H400",
                 "signal": "警告",
                 "reason": f"Σ(Ci×Mi)/100={acute_cat1_sum:.3f}>=0.25",
@@ -839,7 +852,7 @@ class MixtureCalculator:
                         f"  {c.name}({c.concentration}%): {cls_str}"
                     )
                     return {
-                        "hazard": "金属腐蚀物 Cat 1",
+                        "hazard": "金属腐蚀物，类别1",
                         "h_code": "H290",
                         "signal": "警告",
                         "reason": f"含金属腐蚀组分: {c.name}",
@@ -879,6 +892,45 @@ class MixtureCalculator:
                         all_p[group].append(code)
 
         return all_p
+
+    def _apply_classification_hierarchy(self):
+        """GHS分类覆盖规则：高等级覆盖低等级"""
+        to_remove = set()
+        hazards = [c.get("hazard", "") for c in self.result.classifications]
+
+        # 眼损伤Cat1覆盖眼刺激Cat2A
+        has_eye_cat1 = any("眼损伤" in h and ("类别1" in h or "Cat 1" in h) for h in hazards)
+        if has_eye_cat1:
+            for i, c in enumerate(self.result.classifications):
+                h = c.get("hazard", "")
+                if "眼刺激" in h and ("类别2A" in h or "Cat 2A" in h):
+                    to_remove.add(i)
+
+        # 皮肤腐蚀Cat1覆盖皮肤刺激Cat2
+        has_skin_cat1 = any("皮肤腐蚀" in h and ("类别1" in h or "Cat 1" in h) for h in hazards)
+        if has_skin_cat1:
+            for i, c in enumerate(self.result.classifications):
+                h = c.get("hazard", "")
+                if "皮肤刺激" in h and ("类别2" in h or "Cat 2" in h) and "腐蚀" not in h:
+                    to_remove.add(i)
+
+        # STOT-反复Cat1覆盖Cat2（同一靶器官）
+        stot_re_cat1_organs = set()
+        for c in self.result.classifications:
+            h = c.get("hazard", "")
+            if "反复" in h and ("类别1" in h or "Cat 1" in h):
+                # 提取靶器官
+                organs = re.findall(r'[\(（]([^)）]+)[\)）]', h)
+                for organ in organs:
+                    stot_re_cat1_organs.update(organ.replace("，", ",").replace("、", ",").split(","))
+
+        if to_remove:
+            self.result.classifications = [
+                c for i, c in enumerate(self.result.classifications) if i not in to_remove
+            ]
+            self.result.calculation_log.append(
+                f"  [覆盖规则] 移除{len(to_remove)}项被高等级覆盖的分类"
+            )
 
     def _summarize(self):
         """汇总结果"""

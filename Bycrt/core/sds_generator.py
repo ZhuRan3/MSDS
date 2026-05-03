@@ -465,10 +465,14 @@ class SDSGenerator:
         if "易燃" in ghs_text:
             s10.fields["conditions_to_avoid"] = FieldValue(value="明火、高热、静电、火花。", source="kb")
         elif "腐蚀" in ghs_text:
-            # 酸类水溶液不应建议"避免潮湿/水"
+            # 酸/碱水溶液不应建议"避免潮湿/水"
             _acid_hints_s10ca = ["酸", "HCl", "H2SO4", "HNO3", "H3PO4", "HF"]
-            _is_acid_s10ca = any(h in str(data.get("chemical_name_cn", "")) or h in str(data.get("molecular_formula", "")) for h in _acid_hints_s10ca)
-            if _is_acid_s10ca:
+            _alkali_hints_s10ca = ["碱", "NaOH", "KOH", "Ca(OH)2", "氢氧化", "次氯酸钠", "NaClO"]
+            name_str = str(data.get("chemical_name_cn", ""))
+            formula_str = str(data.get("molecular_formula", ""))
+            _is_acid_s10ca = any(h in name_str or h in formula_str for h in _acid_hints_s10ca)
+            _is_alkali_s10ca = any(h in name_str or h in formula_str for h in _alkali_hints_s10ca)
+            if _is_acid_s10ca or _is_alkali_s10ca:
                 s10.fields["conditions_to_avoid"] = FieldValue(value="高温、明火。", source="kb")
             else:
                 s10.fields["conditions_to_avoid"] = FieldValue(value="潮湿环境、水。", source="kb")
@@ -1442,6 +1446,19 @@ class SDSGenerator:
             hazard = hazard_parts[0]
 
         media = "；".join(media_parts) if media_parts else "干粉、二氧化碳、泡沫、砂土。"
+        # 去重合并灭火剂（避免"干粉、二氧化碳、泡沫、水雾。；干粉、二氧化碳、干砂。"）
+        media_items = re.split(r'[；;]', media)
+        all_items = set()
+        unique_items = []
+        for item in media_items:
+            item = item.strip().rstrip('。')
+            for sub in item.split('、'):
+                sub = sub.strip()
+                if sub and sub not in all_items:
+                    all_items.add(sub)
+                    unique_items.append(sub)
+        if unique_items:
+            media = '、'.join(unique_items) + '。'
         prohibited = prohibited_parts[0] if prohibited_parts else "无特殊禁止要求。"
         # 取最严格的消防建议
         advice = advice_parts[0] if advice_parts else ""
@@ -1672,9 +1689,15 @@ class SDSGenerator:
         engineering = "密闭操作。提供良好的自然通风条件。工作场所应安装紧急洗眼装置和淋浴设备。"
         respiratory = "浓度超标时佩戴防毒面具。" + ("紧急事态下佩戴正压式呼吸器。" if is_toxic else "")
         eye = "化学安全防护眼镜。" + ("必要时戴面罩。" if is_corrosive else "")
-        skin = "穿防静电工作服。" if is_flammable else \
-               "穿防酸碱工作服。戴橡胶手套。" if is_corrosive else \
-               "穿一般工作服。戴防护手套。"
+        skin = ""
+        if is_corrosive and is_flammable:
+            skin = "穿防酸碱工作服和防静电内衣。戴耐酸碱橡胶手套。"
+        elif is_corrosive:
+            skin = "穿防酸碱工作服。戴橡胶手套。"
+        elif is_flammable:
+            skin = "穿防静电工作服。"
+        else:
+            skin = "穿一般工作服。戴防护手套。"
         hygiene = "工作现场禁止吸烟、进食和饮水。工作后淋浴更衣。"
 
         return (
@@ -1905,7 +1928,20 @@ class SDSGenerator:
             else:
                 reaction_notes.append("与酸类接触可发生剧烈反应。")
         if "水" in incompat_lower and ("腐蚀" in all_ghs_s10 or "碱" in str(comp_names)):
-            reaction_notes.append("遇水剧烈放热，可能引起飞溅。")
+            # 检查是否有高浓度碱/酸组分（>20%才算浓溶液，稀溶液遇水不剧烈放热）
+            has_concentrated_corrosive = False
+            for cd in (getattr(self, '_components_data', []) or []):
+                conc_str = str(cd.get("concentration", "0")).replace("%", "")
+                try:
+                    conc_val = float(conc_str)
+                except (ValueError, TypeError):
+                    conc_val = 0
+                cn = str(cd.get("chemical_name_cn", ""))
+                if conc_val > 20 and ("氢氧化" in cn or "酸" in cn or "碱" in cn):
+                    has_concentrated_corrosive = True
+                    break
+            if has_concentrated_corrosive:
+                reaction_notes.append("遇水剧烈放热，可能引起飞溅。")
         if has_chlorinated:
             reaction_notes.append("含卤素有机物与活泼金属（铝、镁、锌）反应可产生有毒气体。含氯有机物在紫外线或高温下可分解产生光气（碳酰氯），应避免阳光直射。")
         if "易燃" in all_ghs_s10 and ("氧化" in all_ghs_s10 or "过氧化" in all_ghs_s10):
@@ -2016,9 +2052,15 @@ class SDSGenerator:
                 del s11.fields["eye_damage_category"]
 
         def tox_field(key, label):
-            val = self._val(11, key, "无可用数据 [待确认]")
+            val = self._val(11, key, "")
+            # 字段不存在于S11（被NEW-118一致性检查删除）且S2无此分类 → "无需进行分类"
+            is_no_class = not val or val.strip() == "[待确认]" or val.strip() == "" or "待确认" in val
+            if is_no_class and key in ("skin_corrosion_category", "eye_damage_category"):
+                val = "根据现有信息无需进行分类。"
+            elif is_no_class:
+                val = "无可用数据 [待确认]"
             # DEF-109: 自动追加单位（裸数值时补充mg/kg或mg/L）
-            if val and "无可用数据" not in val and "待确认" not in val:
+            if "无可用数据" not in val and "待确认" not in val and "无需进行分类" not in val:
                 # 移除来源注释后检查
                 clean = re.sub(r'\s*<!--.*?-->\s*', '', str(val)).strip()
                 has_unit = any(u in clean for u in ["mg/kg", "mg/L", "ppm", "g/kg"])
@@ -2036,7 +2078,22 @@ class SDSGenerator:
         symptom_lines = []
         for cls in getattr(self, '_classifications', []):
             hazard = cls.get("hazard", "")
+            h_code = cls.get("h_code", "")
+            # 区分眼损伤Cat1和眼刺激Cat2A：避免Cat2A使用Cat1的严重描述
+            if "眼损伤" in hazard or "眼刺激" in hazard:
+                cat_val = cls.get("category", "")
+                cat_str = str(cat_val) + hazard
+                if "Cat 1" in cat_str or "类别1" in cat_str or "类别 1" in cat_str:
+                    desc = self.TOX_SYMPTOMS_KB.get("严重眼损伤", "")
+                else:
+                    # Cat2A/2B → 眼刺激描述
+                    desc = self.TOX_SYMPTOMS_KB.get("眼刺激", "")
+                if desc and desc not in symptom_lines:
+                    symptom_lines.append(desc)
+                continue
             for key, desc in self.TOX_SYMPTOMS_KB.items():
+                if key in ("严重眼损伤", "眼刺激"):
+                    continue  # 已在上面单独处理
                 # 模糊匹配分类名
                 key_parts = key.replace("STOT-", "").replace("单次", "").replace("反复", "").split("-")
                 if any(kp in hazard for kp in key_parts if len(kp) > 1):
@@ -2724,7 +2781,14 @@ def generate_mixture_sds(components_data: List[dict],
         conc = comp.get("concentration", "")
         ghs_raw = comp.get("ghs_classifications", "")
         if isinstance(ghs_raw, list):
-            ghs = ", ".join(str(g) for g in ghs_raw)
+            # 标准化每条分类格式: " - 类别 X" → "，类别X"
+            normalized = []
+            for g in ghs_raw:
+                g_str = str(g)
+                g_str = re.sub(r'\s*-\s*类别\s*', '，类别', g_str)
+                g_str = re.sub(r'\s*-\s*Cat\s*', '，Cat ', g_str)
+                normalized.append(g_str)
+            ghs = ", ".join(normalized)
         else:
             ghs = str(ghs_raw) if ghs_raw else ""
         comp_table.append({
@@ -2738,7 +2802,7 @@ def generate_mixture_sds(components_data: List[dict],
     for key in ["cas_number", "molecular_formula", "molecular_weight",
                 "ec_number", "iupac_name"]:
         s1.fields[key] = FieldValue(value="不适用（混合物，见第三部分成分表）", source="template")
-    s1.fields["un_number"] = FieldValue(value="不适用", source="template")
+    s1.fields["un_number"] = FieldValue(value="见第十四部分", source="template")
     # NEW-109: 混合物英文名称使用产品名 + " mixture"，而非第一个组分名
     if product_name:
         s1.fields["product_name_en"] = FieldValue(value=f"{product_name} mixture", source="template")
@@ -2998,6 +3062,11 @@ def generate_mixture_sds(components_data: List[dict],
             value=f"ATE ≈ {calc_result.ate_dermal:.0f} mg/kg（混合物估算值）",
             source="classification")
 
+    # R-09: 混合物为液体时，若LC50吸入显示"不适用（固体）"，替换为"无可用数据"
+    lc50_val = s11.fields.get("lc50_inhalation")
+    if lc50_val and "固体" in str(lc50_val.value):
+        s11.fields["lc50_inhalation"] = FieldValue(value="无可用数据", source="classification")
+
     # 混合物S11毒理：从组分GHS分类反填（皮肤/眼/致癌/生殖/STOT等）
     # 扫描所有组分的ghs_classifications，聚合各危害类别
     all_comp_ghs = []
@@ -3009,16 +3078,31 @@ def generate_mixture_sds(components_data: List[dict],
             all_comp_ghs.append(str(ghs_raw))
     all_ghs_text = " ".join(str(g) for g in all_comp_ghs)
 
-    # 皮肤腐蚀/刺激
+    # 皮肤腐蚀/刺激 — 取最严重等级
     if any(kw in all_ghs_text for kw in ["皮肤腐蚀", "皮肤刺激"]):
         skin_cats = [g for g in all_comp_ghs if "皮肤腐蚀" in str(g) or "皮肤刺激" in str(g)]
+        # 优先取腐蚀(Cat1) > 刺激(Cat2)
+        has_corrosion = any("皮肤腐蚀" in str(c) and ("Cat 1" in str(c) or "类别1" in str(c)) for c in skin_cats)
+        if has_corrosion:
+            best = next(c for c in skin_cats if "皮肤腐蚀" in str(c) and ("Cat 1" in str(c) or "类别1" in str(c)))
+        elif any("皮肤腐蚀" in str(c) for c in skin_cats):
+            best = next(c for c in skin_cats if "皮肤腐蚀" in str(c))
+        else:
+            best = skin_cats[0]
         s11.fields["skin_corrosion_category"] = FieldValue(
-            value=", ".join(str(c) for c in set(skin_cats)), source="classification")
-    # 严重眼损伤/眼刺激
+            value=str(best), source="classification")
+    # 严重眼损伤/眼刺激 — 取最严重等级
     if any(kw in all_ghs_text for kw in ["眼损伤", "眼刺激"]):
         eye_cats = [g for g in all_comp_ghs if "眼损伤" in str(g) or "眼刺激" in str(g)]
+        has_severe = any("眼损伤" in str(c) and ("Cat 1" in str(c) or "类别1" in str(c) or "类别 1" in str(c)) for c in eye_cats)
+        if has_severe:
+            best = next(c for c in eye_cats if "眼损伤" in str(c) and ("Cat 1" in str(c) or "类别1" in str(c) or "类别 1" in str(c)))
+        elif any("眼损伤" in str(c) for c in eye_cats):
+            best = next(c for c in eye_cats if "眼损伤" in str(c))
+        else:
+            best = eye_cats[0]
         s11.fields["eye_damage_category"] = FieldValue(
-            value=", ".join(str(c) for c in set(eye_cats)), source="classification")
+            value=str(best), source="classification")
     # 致突变性
     if "致突变" in all_ghs_text:
         s11.fields["mutagenicity"] = FieldValue(value="根据组分分类推断", source="classification")
@@ -3034,15 +3118,36 @@ def generate_mixture_sds(components_data: List[dict],
         if "生殖" in hazard:
             if "reproductive_toxicity_category" not in s11.fields or "待确认" in str(s11.fields.get("reproductive_toxicity_category", "")):
                 s11.fields["reproductive_toxicity_category"] = FieldValue(value=hazard, source="classification")
-    # 特异性靶器官毒性
-    stot_se = [g for g in all_comp_ghs if "靶器官" in str(g) and "单次" in str(g)]
+    # 特异性靶器官毒性 — 归并去重，按Cat等级排序
+    stot_se = [str(g) for g in all_comp_ghs if "靶器官" in str(g) and "单次" in str(g)]
     if stot_se:
+        # 去重：标准化格式后取唯一
+        seen_targets = set()
+        unique_se = []
+        for s in stot_se:
+            # 提取靶器官关键词
+            targets = re.findall(r'[\(（]([^)）]+)[\)）]|(\w+[器官系统])', s)
+            target_key = "".join("".join(t) for t in targets) if targets else s
+            if target_key not in seen_targets:
+                seen_targets.add(target_key)
+                unique_se.append(s)
         s11.fields["stot_single_exposure"] = FieldValue(
-            value=", ".join(str(c) for c in set(stot_se)), source="classification")
-    stot_re = [g for g in all_comp_ghs if "靶器官" in str(g) and "反复" in str(g)]
+            value="；".join(unique_se), source="classification")
+    stot_re = [str(g) for g in all_comp_ghs if "靶器官" in str(g) and "反复" in str(g)]
     if stot_re:
+        # 优先Cat1，按靶器官去重
+        cat1_items = [s for s in stot_re if "Cat 1" in s or "类别1" in s or "类别 1" in s]
+        cat2_items = [s for s in stot_re if "Cat 2" in s or "类别2" in s or "类别 2" in s]
+        seen_targets = set()
+        unique_re = []
+        for s in (cat1_items + cat2_items):
+            targets = re.findall(r'[\(（]([^)）]+)[\)）]|(\w+[器官系统经液])', s)
+            target_key = "".join("".join(t) for t in targets) if targets else s
+            if target_key not in seen_targets:
+                seen_targets.add(target_key)
+                unique_re.append(s)
         s11.fields["stot_repeated_exposure"] = FieldValue(
-            value=", ".join(str(c) for c in set(stot_re)), source="classification")
+            value="；".join(unique_re), source="classification")
     # 吸入危害（DEF-003: 根据组分类型判断描述）
     if any(kw in all_ghs_text for kw in ["吸入危害", "吸入危险"]):
         # 检查是否含有机液体组分
