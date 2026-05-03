@@ -242,6 +242,7 @@ class SDSPipeline:
             components_data, classifications,
             product_name,
             use_llm=use_llm, version="1.0", revision_date=rev_date,
+            calc_result=mix_result,
         )
 
         # L6: 审查
@@ -316,40 +317,30 @@ class SDSPipeline:
             print(f"  [WARN] kb_manager获取失败: {e}")
         return None
 
+    # 名称翻译映射（从 name_translations.json 加载，延迟初始化）
+    _cn_en_map: Optional[Dict[str, str]] = None
+
+    def _get_cn_en_map(self) -> Dict[str, str]:
+        """加载中英文名称映射"""
+        if SDSPipeline._cn_en_map is None:
+            try:
+                map_path = PROJECT_ROOT / "db" / "name_translations.json"
+                with open(map_path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                SDSPipeline._cn_en_map = data.get("cn_to_en", {})
+            except Exception:
+                SDSPipeline._cn_en_map = {}
+        return SDSPipeline._cn_en_map
+
     def _translate_to_english(self, chinese_name: str) -> Optional[str]:
         """将中文化学品名翻译为英文名（用于PubChem查询）"""
         # 先检查是否已经是英文名
         if re.match(r'^[a-zA-Z0-9\s\-_,.]+$', chinese_name):
             return chinese_name
-        # 常见中文名→英文名映射
-        CN_EN_MAP = {
-            "丙酮": "acetone", "乙醇": "ethanol", "甲醇": "methanol",
-            "甲醛": "formaldehyde", "甲苯": "toluene", "二甲苯": "xylene",
-            "苯": "benzene", "苯酚": "phenol", "苯乙烯": "styrene",
-            "乙酸": "acetic acid", "盐酸": "hydrochloric acid",
-            "硫酸": "sulfuric acid", "硝酸": "nitric acid",
-            "氢氧化钠": "sodium hydroxide", "氢氧化钾": "potassium hydroxide",
-            "氨": "ammonia", "铜": "copper", "铝": "aluminum",
-            "铁": "iron", "锌": "zinc", "铅": "lead",
-            "汞": "mercury", "银": "silver", "金": "gold",
-            "糠醛": "furfural", "三氯乙烯": "trichloroethylene",
-            "丙烯腈": "acrylonitrile", "二甲基亚砜": "dimethyl sulfoxide",
-            "四氢呋喃": "tetrahydrofuran", "N-甲基吡咯烷酮": "N-methylpyrrolidone",
-            "正己烷": "n-hexane", "环己烷": "cyclohexane",
-            "二氯甲烷": "dichloromethane", "氯仿": "chloroform",
-            "乙醚": "diethyl ether", "异丙醇": "isopropanol",
-            "正丁醇": "n-butanol", "乙二醇": "ethylene glycol",
-            "丙三醇": "glycerol", "乙酸乙酯": "ethyl acetate",
-            "乙酸正丁酯": "n-butyl acetate", "乙二醇丁醚": "ethylene glycol monobutyl ether",
-            "正己醇": "1-hexanol", "环己酮": "cyclohexanone",
-            "甲基叔丁基醚": "methyl tert-butyl ether",
-            "过氧化氢": "hydrogen peroxide", "臭氧": "ozone",
-            "氩": "argon", "氩气": "argon", "氮气": "nitrogen",
-            "氧气": "oxygen", "二氧化碳": "carbon dioxide",
-            "一氧化碳": "carbon monoxide",
-        }
-        if chinese_name in CN_EN_MAP:
-            return CN_EN_MAP[chinese_name]
+        # 从 name_translations.json 加载映射
+        cn_en_map = self._get_cn_en_map()
+        if chinese_name in cn_en_map:
+            return cn_en_map[chinese_name]
         # 尝试LLM翻译
         try:
             sys_path = str(Path(__file__).resolve().parent)

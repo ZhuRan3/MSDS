@@ -240,21 +240,40 @@ class EvidenceRetriever:
                 if cas == query or cas.replace("-", "") == cas_clean:
                     return data
         else:
-            # 名称模糊匹配
+            # 名称匹配：精确匹配优先，然后子串匹配（短名优先避免"甲苯"匹配"三硝基甲苯"）
             query_lower = query.lower()
+
+            # 第一轮：精确匹配
             for cas, data in self.kb.items():
                 name_cn = data.get("chemical_name_cn", "").lower()
                 name_en = data.get("chemical_name_en", "").lower()
                 synonyms = data.get("synonyms", [])
-
-                if query_lower in name_cn or query_lower in name_en:
+                if query_lower == name_cn or query_lower == name_en:
                     return data
                 if isinstance(synonyms, list):
                     for syn in synonyms:
-                        if query_lower in str(syn).lower():
+                        if query_lower == str(syn).lower():
                             return data
-                elif isinstance(synonyms, str) and query_lower in synonyms.lower():
-                    return data
+
+            # 第二轮：子串匹配，按名称长度升序排列（短名优先）
+            candidates = []
+            for cas, data in self.kb.items():
+                name_cn = data.get("chemical_name_cn", "").lower()
+                name_en = data.get("chemical_name_en", "").lower()
+                synonyms = data.get("synonyms", [])
+                matched = False
+                if query_lower in name_cn or query_lower in name_en:
+                    matched = True
+                elif isinstance(synonyms, list):
+                    for syn in synonyms:
+                        if query_lower in str(syn).lower():
+                            matched = True
+                            break
+                if matched:
+                    candidates.append((len(name_cn), data))
+            if candidates:
+                candidates.sort(key=lambda x: x[0])
+                return candidates[0][1]
         return None
 
     def _search_val_samples(self, query: str, query_type: str) -> Optional[dict]:
@@ -325,6 +344,7 @@ class EvidenceRetriever:
             ("solubility_details", "solubility_details"),
             ("solubility", "solubility"),            # KB直接存solubility
             ("partition_coefficient_n-octanol_water", "partition_coefficient_n-octanol_water"),
+            ("partition_coefficient_log_kow", "partition_coefficient_n-octanol_water"),  # DEF-001: LLM推算别名
             ("xlogp", "xlogp"),                       # KB存xlogp (辛醇水分配系数)
             ("appearance", "appearance"),
             ("odor", "odor"),
@@ -357,6 +377,8 @@ class EvidenceRetriever:
             ("reproductive_toxicity_category", "reproductive_toxicity_category"),
             ("stot_single_exposure", "stot_single_exposure"),
             ("stot_repeated_exposure", "stot_repeated_exposure"),
+            ("IARC致癌分类", "carcinogenicity_iarc"),          # KB中文别名
+            ("carcinogenicity_iarc", "carcinogenicity_iarc"),   # 英文标准key
         ]
         for data_key, field_name in tox_field_aliases:
             val = data.get(data_key)

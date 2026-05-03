@@ -479,10 +479,16 @@ class MixtureCalculator:
         return results
 
     def _hazard_match(self, cls_str: str, hazard_type: str) -> bool:
-        """模糊匹配危害分类"""
-        # 简单包含匹配
+        """模糊匹配危害分类 — 支持中英文双格式"""
+        # 标准化后直接子串匹配
+        normalized = _normalize_ghs_for_matching(cls_str)
+        if hazard_type in normalized:
+            return True
+        # 关键词匹配
         keywords = hazard_type.replace(" Cat", "").split()
-        return all(kw in cls_str for kw in keywords)
+        if all(kw in normalized for kw in keywords):
+            return True
+        return False
 
     def check_flammability(self) -> Optional[Dict]:
         """检查易燃性"""
@@ -649,13 +655,13 @@ class MixtureCalculator:
         return self.result
 
     def check_aquatic_toxicity(self) -> List[Dict]:
-        """检查水生环境危害（加和法）"""
+        """检查水生环境危害（M因子加权求和法，UN GHS 4.1.3）"""
         results = []
         self.result.calculation_log.append(f"\n{'='*60}")
-        self.result.calculation_log.append("水生环境危害检查")
+        self.result.calculation_log.append("水生环境危害检查（M因子求和法）")
         self.result.calculation_log.append(f"{'='*60}")
 
-        # 简化实现：检查各组分的GHS分类中是否有水生危害
+        # 收集水生危害组分及其分类
         aquatic_components = []
         for c in self.components:
             for cls_str in c.ghs_classifications:
@@ -673,61 +679,77 @@ class MixtureCalculator:
                         cat = "长期3"
 
                     if cat:
+                        # M因子：默认为1，从组分属性读取（如果有）
+                        m_factor = getattr(c, 'm_factor', 1) or 1
                         aquatic_components.append({
                             "name": c.name,
                             "conc": c.concentration,
                             "cat": cat,
+                            "m": m_factor,
                             "cls": cls_str,
                         })
                         self.result.calculation_log.append(
-                            f"  {c.name}({c.concentration}%): {cls_str}"
+                            f"  {c.name}({c.concentration}%): {cls_str}, M={m_factor}"
                         )
 
-        # 加和法判定
         if not aquatic_components:
             self.result.calculation_log.append("  -> 无水生危害组分")
             return results
 
-        # 简化规则：
-        # 长期Cat1组分 ≥ 0.1% (有M-factor时更低) → 长期Cat1
-        # 长期Cat1组分 ≥ 1% 或 Cat2组分累加 → 长期Cat2
-        cat1_long_conc = sum(a["conc"] for a in aquatic_components if "长期1" in a["cat"])
-        cat2_long_conc = sum(a["conc"] for a in aquatic_components if "长期2" in a["cat"])
-        cat1_acute_conc = sum(a["conc"] for a in aquatic_components if "急性1" in a["cat"])
+        # M因子加权求和法（UN GHS 4.1.3）
+        # Σ(Ci × Mi) / 100
+        # 长期Cat1: Σ(C×M)/100 >= 0.1 → 长期Cat1; >= 0.01 → 长期Cat2
+        # 长期Cat2: Σ(C×M)/100 >= 0.25 → 长期Cat2
+        # 急性Cat1: Σ(C×M)/100 >= 0.25 → 急性Cat1; >= 0.025 → 急性Cat2
 
-        if cat1_long_conc >= 0.1:
+        long_cat1_sum = sum(a["conc"] * a["m"] for a in aquatic_components if "长期1" in a["cat"]) / 100
+        long_cat2_sum = sum(a["conc"] * a["m"] for a in aquatic_components if "长期2" in a["cat"]) / 100
+        acute_cat1_sum = sum(a["conc"] * a["m"] for a in aquatic_components if "急性1" in a["cat"]) / 100
+
+        self.result.calculation_log.append(f"  长期Cat1 Σ(Ci×Mi)/100 = {long_cat1_sum:.4f}")
+        self.result.calculation_log.append(f"  长期Cat2 Σ(Ci×Mi)/100 = {long_cat2_sum:.4f}")
+        self.result.calculation_log.append(f"  急性Cat1 Σ(Ci×Mi)/100 = {acute_cat1_sum:.4f}")
+
+        # 长期危害判定
+        if long_cat1_sum >= 0.1:
             results.append({
                 "hazard": "危害水生环境-长期 Cat 1",
                 "h_code": "H410",
                 "signal": "警告",
-                "reason": f"长期Cat1组分总浓度{cat1_long_conc:.1f}%>=0.1%",
+                "reason": f"Σ(Ci×Mi)/100={long_cat1_sum:.3f}>=0.1",
                 "classification_confidence": 0.8,
-                "classification_basis": {"method": "summation_method", "rule_reference": "UN GHS 4.1.3", "threshold": 0.1, "actual": round(cat1_long_conc, 2)},
+                "classification_basis": {"method": "M-factor_summation", "rule_reference": "UN GHS 4.1.3",
+                                          "cat1_weighted_sum": round(long_cat1_sum, 4)},
             })
-            self.result.calculation_log.append(f"  -> 长期Cat1组分{cat1_long_conc:.1f}%>=0.1% -> 长期Cat1")
-        elif cat1_long_conc >= 1.0 or cat2_long_conc >= 2.5:
+            self.result.calculation_log.append(f"  -> 长期Cat1 (Σ={long_cat1_sum:.3f}>=0.1)")
+        elif long_cat1_sum >= 0.01 or long_cat2_sum >= 0.25:
             results.append({
                 "hazard": "危害水生环境-长期 Cat 2",
                 "h_code": "H411",
                 "signal": "警告",
-                "reason": f"长期Cat1组分{cat1_long_conc:.1f}%或Cat2组分{cat2_long_conc:.1f}%",
+                "reason": f"Cat1加权Σ={long_cat1_sum:.3f}，Cat2加权Σ={long_cat2_sum:.3f}",
                 "classification_confidence": 0.7,
-                "classification_basis": {"method": "summation_method", "rule_reference": "UN GHS 4.1.3", "cat1_conc": round(cat1_long_conc, 2), "cat2_conc": round(cat2_long_conc, 2)},
+                "classification_basis": {"method": "M-factor_summation", "rule_reference": "UN GHS 4.1.3",
+                                          "cat1_weighted_sum": round(long_cat1_sum, 4),
+                                          "cat2_weighted_sum": round(long_cat2_sum, 4)},
             })
-            self.result.calculation_log.append(f"  -> 触发长期Cat2")
+            self.result.calculation_log.append(f"  -> 长期Cat2")
 
-        if cat1_acute_conc >= 1.0:
+        # 急性危害判定
+        if acute_cat1_sum >= 0.25:
             results.append({
                 "hazard": "危害水生环境-急性 Cat 1",
                 "h_code": "H400",
                 "signal": "警告",
-                "reason": f"急性Cat1组分总浓度{cat1_acute_conc:.1f}%>=1%",
+                "reason": f"Σ(Ci×Mi)/100={acute_cat1_sum:.3f}>=0.25",
                 "classification_confidence": 0.8,
-                "classification_basis": {"method": "summation_method", "rule_reference": "UN GHS 4.1.3", "threshold": 1.0, "actual": round(cat1_acute_conc, 2)},
+                "classification_basis": {"method": "M-factor_summation", "rule_reference": "UN GHS 4.1.3",
+                                          "acute_weighted_sum": round(acute_cat1_sum, 4)},
             })
+            self.result.calculation_log.append(f"  -> 急性Cat1")
 
         if not results:
-            self.result.calculation_log.append("  -> 各组分浓度未达触发阈值")
+            self.result.calculation_log.append("  -> 各组分加权浓度未达触发阈值")
 
         return results
 
@@ -926,15 +948,33 @@ def load_component_from_kb(cas: str, name: str = "") -> Optional[Dict]:
     if isinstance(kb, dict):
         if cas in kb:
             return kb[cas]
-        # 按名称模糊查找
+        # 按CAS号字段查找
         for key, entry in kb.items():
-            if name and (name in entry.get("name_cn", "") or name in entry.get("name_en", "")):
+            if entry.get("cas_number") == cas:
                 return entry
+        # 按名称模糊查找（精确匹配优先，子串匹配其次）
+        for key, entry in kb.items():
+            cn = entry.get("chemical_name_cn", "")
+            en = entry.get("chemical_name_en", "")
+            if name and (name == cn or name == en):
+                return entry
+        for key, entry in kb.items():
+            cn = entry.get("chemical_name_cn", "")
+            en = entry.get("chemical_name_en", "")
+            syns = entry.get("synonyms", [])
+            if name and (name in cn or name in en):
+                return entry
+            if isinstance(syns, list) and name:
+                for s in syns:
+                    if name in str(s):
+                        return entry
     elif isinstance(kb, list):
         for entry in kb:
-            if entry.get("cas") == cas:
+            if entry.get("cas") == cas or entry.get("cas_number") == cas:
                 return entry
-            if name and (name in entry.get("name_cn", "") or name in entry.get("name_en", "")):
+            cn = entry.get("chemical_name_cn", "")
+            en = entry.get("chemical_name_en", "")
+            if name and (name in cn or name in en):
                 return entry
 
     return None
@@ -959,6 +999,42 @@ def _parse_numeric(value) -> Optional[float]:
     return None
 
 
+def _normalize_ghs_for_matching(cls_str: str) -> str:
+    """标准化GHS分类字符串，使中文格式匹配计算器内部检查格式。
+
+    KB存储格式: "皮肤刺激 (类别 2)", "特异性靶器官毒性-反复接触 (类别 2, 肝脏)"
+    计算器匹配: "皮肤刺激 Cat 2", "STOT-反复 Cat 2"
+    """
+    import re
+    s = cls_str
+    # 先提取括号内的类别编号并放到括号外，再移除括号
+    # 处理 "皮肤腐蚀/刺激（类别1B）" → "皮肤腐蚀/刺激 类别1B"
+    s = re.sub(r'[（(]\s*类别\s*(\d+[A-Za-z]?)\s*[）)]', r' Cat \1', s)
+    # 处理剩余括号（器官限定符等）: "(呼吸道)" → 移除
+    s = re.sub(r'[（(][^）)]*[）)]', '', s)
+    # 标点统一：中文逗号→空格
+    s = s.replace("，", " ").replace(",", " ")
+    # "类别 2" / "类别2" / "类别 2A" → "Cat 2" / "Cat 2A"（处理不在括号中的情况）
+    s = re.sub(r'类别\s*(\d+[A-Za-z]?)', r'Cat \1', s)
+    # 中文全称 → 计算器缩写（DEF-002: 补充PubChem格式的别名）
+    aliases = [
+        ("特异性靶器官毒性-反复接触", "STOT-反复"),
+        ("特异性靶器官毒性-单次接触", "STOT-单次"),
+        ("特异性靶器官毒性-一次接触", "STOT-单次"),
+        ("吸入危险", "吸入危害"),
+        ("危害水生环境-急性危害", "水生环境-急性"),
+        ("危害水生环境-长期危害", "水生环境-长期"),
+        ("对水生环境有害-急性危害", "水生环境-急性"),
+        ("对水生环境有害-长期危害", "水生环境-长期"),
+        ("金属腐蚀物", "金属腐蚀"),
+    ]
+    for old, new in aliases:
+        s = s.replace(old, new)
+    s = re.sub(r'\s+', ' ', s)
+    s = s.strip()
+    return s
+
+
 def build_component(name: str, cas: str, concentration: float) -> Component:
     """构建组分对象，尝试从知识库加载数据"""
     comp = Component(name=name, cas=cas, concentration=concentration)
@@ -976,12 +1052,12 @@ def build_component(name: str, cas: str, concentration: float) -> Component:
         if comp.initial_boiling_point is None and comp.boiling_point is not None:
             comp.initial_boiling_point = comp.boiling_point
 
-        # GHS分类列表
+        # GHS分类列表 — 标准化为计算器匹配格式
         ghs = kb_data.get("ghs_classifications", [])
         if isinstance(ghs, list):
-            comp.ghs_classifications = [str(g) for g in ghs if g]
+            comp.ghs_classifications = [_normalize_ghs_for_matching(str(g)) for g in ghs if g]
         elif isinstance(ghs, str):
-            comp.ghs_classifications = [ghs]
+            comp.ghs_classifications = [_normalize_ghs_for_matching(ghs)]
 
     return comp
 

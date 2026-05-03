@@ -403,14 +403,14 @@ CAS号: {cas}
 9. density: 相对密度
 10. solubility: 溶解性
 11. ld50_oral: 经口LD50
-12.皮肤腐蚀类别
-13.眼损伤类别
+12. skin_corrosion_category: 皮肤腐蚀类别
+13. eye_damage_category: 眼损伤类别
 14. ld50_dermal: 经皮LD50
 15. lc50_inhalation: 吸入LC50
-16. IARC致癌分类
-17. 生物降解性
-18. BCF生物富集系数
-19. Koc土壤迁移系数
+16. carcinogenicity_iarc: IARC致癌分类
+17. persistence_degradability: 生物降解性
+18. bioaccumulation_bcf: BCF生物富集系数
+19. mobility_in_soil: Koc土壤迁移系数
 
 输出仅JSON，不要其他内容："""
 
@@ -475,7 +475,7 @@ class KnowledgeBaseManager:
         # 构建基础数据
         chem = {
             "chemical_name_cn": name_cn or props.get('IUPACName', cas),
-            "chemical_name_en": props.get('CanonicalSMILES', ''),
+            "chemical_name_en": props.get('IUPACName', ''),  # DEF-004: 使用IUPAC名称而非SMILES
             "molecular_formula": props.get('MolecularFormula', ''),
             "molecular_weight": str(props.get('MolecularWeight', '')),
             "cas_number": cas,
@@ -535,6 +535,18 @@ class KnowledgeBaseManager:
                 chem['chemical_name_cn']
             )
             if llm_data:
+                # DEF-004: 规范化LLM返回的key名（兼容旧版中文key）
+                _CN_TO_EN_KEYS = {
+                    "皮肤腐蚀类别": "skin_corrosion_category",
+                    "眼损伤类别": "eye_damage_category",
+                    "IARC致癌分类": "carcinogenicity_iarc",
+                    "生物降解性": "persistence_degradability",
+                    "BCF生物富集系数": "bioaccumulation_bcf",
+                    "Koc土壤迁移系数": "mobility_in_soil",
+                }
+                for cn_key, en_key in _CN_TO_EN_KEYS.items():
+                    if cn_key in llm_data and en_key not in llm_data:
+                        llm_data[en_key] = llm_data.pop(cn_key)
                 chem.update(llm_data)
                 print(f"  [OK] LLM推断完成")
             else:
@@ -554,81 +566,69 @@ class KnowledgeBaseManager:
 
         return True
 
+    # 推断规则缓存（从 chemical_type_rules.json 加载）
+    _inference_rules: Optional[Dict] = None
+
+    def _load_inference_rules(self) -> Dict:
+        """加载推断规则"""
+        if KnowledgeBaseManager._inference_rules is None:
+            try:
+                rules_path = Path(__file__).resolve().parent.parent / "db" / "chemical_type_rules.json"
+                with open(rules_path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                KnowledgeBaseManager._inference_rules = {
+                    "formula_inference": data.get("formula_inference", []),
+                    "default_inference": data.get("default_inference", {}),
+                }
+            except Exception:
+                KnowledgeBaseManager._inference_rules = {
+                    "formula_inference": [],
+                    "default_inference": {"chemical_family": "有机化合物", "un_number": "1993"},
+                }
+        return KnowledgeBaseManager._inference_rules
+
     def _apply_default_inference(self, chem: Dict) -> Dict:
-        """应用默认推断规则"""
+        """应用默认推断规则（从 chemical_type_rules.json 的 formula_inference 读取）"""
+        import re as _re
 
         formula = chem.get('molecular_formula', '')
+        rules = self._load_inference_rules()
+        formula_inference = rules.get("formula_inference", [])
+        default = rules.get("default_inference", {"chemical_family": "有机化合物", "un_number": "1993"})
 
-        # 酚类检测
-        if formula == 'C6H6O':
-            chem['chemical_family'] = '酚类化合物'
-            chem['un_number'] = '2021'
-            chem['ghs_classifications'] = ['皮肤腐蚀/刺激，类别2', '严重眼损伤/眼刺激，类别1', '特异性靶器官毒性-一次接触，类别3']
-            chem['pictograms'] = ['火焰', '腐蚀', '感叹号']
-            chem['signal_word'] = '危险'
-            chem['ld50_oral'] = '317 mg/kg（大鼠）'
-            chem['ld50_dermal'] = '525 mg/kg（兔子）'
-            chem['flash_point'] = '79°C（闭杯）'
-            chem['boiling_point'] = '181.7°C'
-            chem['melting_point'] = '40.6°C'
-            chem['density'] = '1.07 g/cm³'
-            chem['solubility'] = '微溶于水，可溶于乙醇、乙醚、氯仿'
-            chem['partition_coefficient_log_kow'] = '1.46'
-            chem['eye_damage_category'] = '类别1'
-            chem['carcinogenicity_iarc'] = '第3组'
-        # 醇类检测（乙anol）
-        elif formula == 'C2H6O':
-            chem['chemical_family'] = '醇类化合物'
-            chem['un_number'] = '1170'
-            chem['ghs_classifications'] = ['易燃液体，类别2', '严重眼损伤/眼刺激，类别2A']
-            chem['pictograms'] = ['火焰', '感叹号']
-            chem['signal_word'] = '危险'
-            chem['ld50_oral'] = '7060 mg/kg（大鼠）'
-            chem['flash_point'] = '13°C（闭杯）'
-            chem['boiling_point'] = '78°C'
-            chem['melting_point'] = '-114°C'
-        # 丙酮
-        elif formula == 'C3H6O':
-            chem['chemical_family'] = '酮类化合物'
-            chem['un_number'] = '1193'
-            chem['ghs_classifications'] = ['易燃液体，类别2', '严重眼损伤/眼刺激，类别2A', '特异性靶器官毒性-一次接触，类别3']
-            chem['pictograms'] = ['火焰', '感叹号']
-            chem['signal_word'] = '危险'
-            chem['ld50_oral'] = '5800 mg/kg（大鼠）'
-            chem['flash_point'] = '-20°C（闭杯）'
-            chem['boiling_point'] = '56°C'
-        # 其他含氧有机物
-        elif 'O' in formula and 'C' in formula and 'H' in formula:
-            chem['chemical_family'] = '含氧有机化合物'
-            chem['un_number'] = '1993'
-        # 腈类
-        elif 'N' in formula and 'C' in formula and 'H' in formula:
-            chem['chemical_family'] = '腈类化合物'
-            chem['un_number'] = '1648'
-            chem['ghs_classifications'] = ['易燃液体，类别2', '急性毒性-经口，类别3']
-            chem['pictograms'] = ['火焰', '健康危害']
-            chem['signal_word'] = '危险'
-        # 无机碱
-        elif 'OH' in formula and ('Na' in formula or 'K' in formula or 'Ca' in formula):
-            chem['chemical_family'] = '无机碱'
-            chem['un_number'] = '1823'
-            chem['ghs_classifications'] = ['金属腐蚀物，类别1', '皮肤腐蚀/刺激，类别1A']
-            chem['pictograms'] = ['腐蚀']
-            chem['signal_word'] = '危险'
-        # 烃类
-        elif 'C' in formula and 'H' in formula and 'O' not in formula and 'N' not in formula:
-            if formula.count('C') >= 6:
-                chem['chemical_family'] = '芳香烃'
-                chem['un_number'] = '1294'
+        matched = False
+        for rule in formula_inference:
+            # 精确分子式匹配
+            if "formula" in rule and formula == rule["formula"]:
+                matched = True
+            # 正则模式匹配
+            elif "formula_pattern" in rule and formula and _re.match(rule["formula_pattern"], formula):
+                matched = True
+
+            if matched:
+                for key in ["chemical_family", "un_number", "ghs_classifications", "pictograms",
+                            "signal_word", "ld50_oral", "ld50_dermal", "flash_point", "boiling_point",
+                            "melting_point", "density", "solubility", "partition_coefficient_log_kow",
+                            "eye_damage_category", "carcinogenicity_iarc"]:
+                    if key in rule:
+                        chem[key] = rule[key]
+                break
+
+        if not matched and formula:
+            # 回退：烃类检测
+            if 'C' in formula and 'H' in formula and 'O' not in formula and 'N' not in formula:
+                if formula.count('C') >= 6:
+                    chem['chemical_family'] = '芳香烃'
+                    chem['un_number'] = '1294'
+                else:
+                    chem['chemical_family'] = '烷烃'
+                    chem['un_number'] = '1208'
+                chem['ghs_classifications'] = ['易燃液体，类别2']
+                chem['pictograms'] = ['火焰']
+                chem['signal_word'] = '危险'
             else:
-                chem['chemical_family'] = '烷烃'
-                chem['un_number'] = '1208'
-            chem['ghs_classifications'] = ['易燃液体，类别2']
-            chem['pictograms'] = ['火焰']
-            chem['signal_word'] = '危险'
-        else:
-            chem['chemical_family'] = '有机化合物'
-            chem['un_number'] = '1993'
+                chem.setdefault('chemical_family', default.get('chemical_family', '有机化合物'))
+                chem.setdefault('un_number', default.get('un_number', '1993'))
 
         return chem
 

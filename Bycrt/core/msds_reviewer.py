@@ -19,6 +19,23 @@ from typing import Dict, List, Tuple
 class MSDSReviewer:
     """MSDS审查器"""
 
+    @staticmethod
+    def _load_h_codes_from_mappings():
+        """DEF-005: 从ghs_mappings.json动态加载H-code映射"""
+        mapping_path = Path(__file__).parent.parent / "db" / "ghs_mappings.json"
+        if mapping_path.exists():
+            with open(mapping_path, "r", encoding="utf-8") as f:
+                mappings = json.load(f)
+            # 将 hazard_class_to_h 反转为 h_code → [classification_names]
+            h_to_class = {}
+            for cls_name, h_code in mappings.get("hazard_class_to_h", {}).items():
+                if h_code not in h_to_class:
+                    h_to_class[h_code] = []
+                h_to_class[h_code].append(cls_name)
+            return h_to_class
+        # fallback: 返回空映射
+        return {}
+
     # 必须包含的16个部分
     REQUIRED_PARTS = [
         "第一部分：化学品及企业标识",
@@ -51,26 +68,21 @@ class MSDSReviewer:
         "环境": "GHS09"
     }
 
-    # H码验证规则
-    H_CODES = {
-        "H225": ["易燃液体，类别1", "易燃液体，类别2", "易燃液体，类别3"],
-        "H226": ["易燃液体，类别3"],
-        "H240": ["爆炸物，不敏感爆炸物，类别1.1"],
-        "H241": ["爆炸物，敏感爆炸物，类别1.1"],
-        "H290": ["金属腐蚀物，类别1"],
-        "H314": ["皮肤腐蚀/刺激，类别1A", "皮肤腐蚀/刺激，类别1B", "皮肤腐蚀/刺激，类别1C"],
-        "H315": ["皮肤腐蚀/刺激，类别2"],
-        "H318": ["严重眼损伤/眼刺激，类别1"],
-        "H319": ["严重眼损伤/眼刺激，类别2A"],
-        "H335": ["特异性靶器官毒性-一次接触，类别3"],
-        "H336": ["特异性靶器官毒性-一次接触（麻醉效应），类别3"],
-        "H302": ["急性毒性-经口，类别4"],
-        "H312": ["急性毒性-经皮，类别4"],
-        "H332": ["急性毒性-吸入，类别4"],
-        "H304": ["吸入危害，类别1"],
-        "H361": ["生殖毒性，类别2"],
-        "H373": ["特异性靶器官毒性-反复接触，类别2"],
-    }
+    # H码验证规则（DEF-005: 动态从ghs_mappings.json加载）
+    # 使用函数加载，避免staticmethod在类定义体中不可调用
+    def _build_h_codes():
+        mapping_path = Path(__file__).parent.parent / "db" / "ghs_mappings.json"
+        if mapping_path.exists():
+            with open(mapping_path, "r", encoding="utf-8") as f:
+                mappings = json.load(f)
+            h_to_class = {}
+            for cls_name, h_code in mappings.get("hazard_class_to_h", {}).items():
+                if h_code not in h_to_class:
+                    h_to_class[h_code] = []
+                h_to_class[h_code].append(cls_name)
+            return h_to_class
+        return {}
+    H_CODES = _build_h_codes()
 
     def __init__(self, file_path: str = "", content: str = ""):
         self.file_path = Path(file_path) if file_path else Path("")
@@ -156,8 +168,14 @@ class MSDSReviewer:
         # 检查H码与分类是否匹配
         hazard_section = self._extract_section("第二部分：危险性概述")
         if hazard_section:
-            # 提取GHS分类
-            ghs_matches = re.findall(r'[\u4e00-\u9fa5]+，类别\d+[A-Z]?', hazard_section)
+            # 提取GHS分类（DEF-005: 扩展正则表达式支持更多格式）
+            ghs_matches = re.findall(
+                r'[\u4e00-\u9fa5/\-]+'                  # 中文名（含/和-）
+                r'[，,\s]*'                               # 分隔符
+                r'(?:类别|Cat\.?\s*)'                     # "类别" 或 "Cat" 或 "Cat."
+                r'\d+[A-Z]?',                             # 类别号
+                hazard_section
+            )
             h_codes_found = re.findall(r'H\d{3}', hazard_section)
 
             # 验证H码存在
@@ -178,6 +196,10 @@ class MSDSReviewer:
                     has_match = any(cls in hazard_section for cls in expected_classes)
                     if not has_match:
                         issues.append(f"H码{h_code}存在但未找到对应GHS分类: {expected_classes[0]}")
+            # DEF-005: 标记未在映射中找到的H-code
+            for h_code in h_codes_found:
+                if h_code not in self.H_CODES:
+                    self.warnings.append(f"H码{h_code}未在ghs_mappings.json中找到映射，需人工确认")
 
             # 检查P码存在性
             p_codes_found = re.findall(r'P\d{3}', self.content)

@@ -65,6 +65,8 @@ class TemplateLoader:
     def __init__(self):
         self.template = self._load_json("sds_template.json")
         self.ghs_mappings = self._load_json("ghs_mappings.json")
+        self.safety_kb = self._load_json("safety_knowledge.json")
+        self.type_rules = self._load_json("chemical_type_rules.json")
 
     def _load_json(self, filename: str) -> dict:
         path = DB_DIR / filename
@@ -96,6 +98,13 @@ class TemplateLoader:
         normalized = self._normalize_hazard(hazard_class)
         if normalized in mapping:
             return mapping[normalized]
+        # DEF-002: 去除限定符后重试（如 "特异性靶器官毒性-单次 Cat 1 呼吸道" → "特异性靶器官毒性-单次 Cat 1"）
+        import re
+        base_match = re.match(r'^(.+?\s+Cat\s+\d+[A-Z]?)\s', normalized)
+        if base_match:
+            base = base_match.group(1)
+            if base in mapping:
+                return mapping[base]
         # Split "/" compound names and try each part
         if "/" in hazard_class:
             cat_part = ""
@@ -115,6 +124,16 @@ class TemplateLoader:
                         return mapping[norm]
         return ""
 
+    # DEF-002: PubChem分类名称 → ghs_mappings.json标准名称 的别名表
+    _HAZARD_NAME_ALIASES = {
+        "对水生环境有害-急性危害": "危害水生环境-急性",
+        "对水生环境有害-长期危害": "危害水生环境-长期",
+        "对水生环境有害 -急性危害": "危害水生环境-急性",
+        "对水生环境有害 -长期危害": "危害水生环境-长期",
+        "吸入危险": "吸入危害",
+        "金属腐蚀物": "金属腐蚀",
+    }
+
     def _normalize_hazard(self, hazard_class: str) -> str:
         """标准化GHS分类名称: '易燃液体，类别2' → '易燃液体 Cat 2'"""
         import re
@@ -124,6 +143,10 @@ class TemplateLoader:
         # 同义词: "一次接触" → "单次", "加压气体" → "高压气体"
         s = s.replace("一次接触", "单次")
         s = s.replace("加压气体", "高压气体")
+        # DEF-002: 应用分类名称别名（在去除括号和连字符之前）
+        for alias, standard in self._HAZARD_NAME_ALIASES.items():
+            if alias in s:
+                s = s.replace(alias, standard)
         # Preserve known classification qualifiers (麻醉效应, 呼吸道刺激, etc.)
         # by converting （qualifier） to plain text before generic bracket removal
         qualifier_match = re.search(r'（([^）]+)）', s)
@@ -132,6 +155,8 @@ class TemplateLoader:
         s = re.sub(r'\(\)', '', s)
         # Normalize spacing around hyphens: "气体 - 压缩" → "气体-压缩"
         s = re.sub(r'\s*-\s*', '-', s)
+        # DEF-002: 合并多个连续空格为单个空格
+        s = re.sub(r'\s+', ' ', s)
         s = s.strip()
         # Append qualifier after category if present
         if qualifier_text:
@@ -255,9 +280,87 @@ class SDSGenerator:
             sec = SDSSection(id=s["id"], title_cn=s["title_cn"], title_en=s["title_en"])
             self.document.sections[s["id"]] = sec
 
+    # === 外部化知识库访问 ===
+    # 所有KB从 safety_knowledge.json 和 chemical_type_rules.json 读取
+    # 保留类常量作为fallback（JSON为空时使用）
+
+    @property
+    def _kb(self):
+        return self.templates.safety_kb
+
+    @property
+    def FIRST_AID_KB(self):
+        return self._kb.get("first_aid", self._FIRST_AID_KB_FALLBACK)
+
+    @property
+    def FIREFIGHTING_KB(self):
+        return self._kb.get("firefighting", self._FIREFIGHTING_KB_FALLBACK)
+
+    @property
+    def HANDLING_KB(self):
+        return self._kb.get("handling_storage", self._HANDLING_KB_FALLBACK)
+
+    @property
+    def DISPOSAL_KB(self):
+        return self._kb.get("disposal", self._DISPOSAL_KB_FALLBACK)
+
+    @property
+    def TOX_SYMPTOMS_KB(self):
+        return self._kb.get("tox_symptoms", self._TOX_SYMPTOMS_KB_FALLBACK)
+
+    @property
+    def TYPE_PRIORITY(self):
+        return self._kb.get("type_priority", {})
+
+    @property
+    def TYPE_RULES(self):
+        return self.templates.type_rules
+
+    @property
+    def TARGET_ORGAN_FIRST_AID(self):
+        return self._kb.get("target_organ_first_aid", {})
+
+    @property
+    def TARGET_ORGAN_SPILL(self):
+        return self._kb.get("target_organ_spill", {})
+
+    @property
+    def DECOMPOSITION_HAZARDS(self):
+        return self._kb.get("decomposition_hazards", {})
+
     # ----------------------------------------------------------
     # 输入数据设置
     # ----------------------------------------------------------
+
+    # 中文key→英文key 的 fallback 映射（DEF-001 修复）
+    _CN_KEY_ALIASES = {
+        "皮肤腐蚀类别": "skin_corrosion_category",
+        "眼损伤类别": "eye_damage_category",
+        "IARC致癌分类": "carcinogenicity_iarc",
+        "生物降解性": "persistence_degradability",
+        "BCF生物富集系数": "bioaccumulation_bcf",
+        "Koc土壤迁移系数": "mobility_in_soil",
+        "partition_coefficient_log_kow": "partition_coefficient_n-octanol_water",
+    }
+
+    def _get_data_value(self, data: dict, key: str, fallback_cn_keys: list = None):
+        """从data中取值，支持中文key fallback"""
+        val = data.get(key)
+        if val:
+            return val
+        # 尝试中文别名
+        cn_alias = self._CN_KEY_ALIASES.get(key)
+        if cn_alias:
+            val = data.get(cn_alias)
+            if val:
+                return val
+        # 尝试额外的fallback keys
+        if fallback_cn_keys:
+            for fk in fallback_cn_keys:
+                val = data.get(fk)
+                if val:
+                    return val
+        return None
 
     def set_chemical_data(self, data: dict):
         """设置化学品基础数据（来自KB或PubChem）"""
@@ -297,13 +400,15 @@ class SDSGenerator:
             "solubility": "solubility_details",
         }
         for field_key, data_key in phys_mappings.items():
-            val = data.get(data_key)
+            val = self._get_data_value(data, data_key, [data_key])
             if val:
                 s9.fields[field_key] = FieldValue(value=val, source="kb")
 
-        # 特殊处理
-        if data.get("solubility_details"):
-            s9.fields["solubility"] = FieldValue(value=data["solubility_details"], source="kb")
+        # 溶解性 fallback：Tier 2 使用 "solubility" 而非 "solubility_details"
+        if "solubility" not in s9.fields or not s9.fields["solubility"].value:
+            sol_val = data.get("solubility_details") or data.get("solubility")
+            if sol_val:
+                s9.fields["solubility"] = FieldValue(value=sol_val, source="kb")
 
         # 第十一部分：毒理学
         s11 = self.document.sections[11]
@@ -317,13 +422,19 @@ class SDSGenerator:
             if val:
                 s11.fields[field_key] = FieldValue(value=val, source="kb")
 
-        # 其他毒理字段
+        # 其他毒理字段（支持中文key fallback）
+        tox_key_aliases = {
+            "skin_corrosion_category": ["皮肤腐蚀类别"],
+            "eye_damage_category": ["眼损伤类别"],
+            "carcinogenicity_iarc": ["IARC致癌分类"],
+        }
         for key in ["skin_corrosion_category", "eye_damage_category", "skin_sensitization",
                      "mutagenicity", "carcinogenicity_ghs", "reproductive_toxicity_category",
-                     "stot_single_exposure", "stot_repeated_exposure"]:
-            if data.get(key):
-                field_name = key
-                s11.fields[field_name] = FieldValue(value=data[key], source="kb")
+                     "stot_single_exposure", "stot_repeated_exposure", "carcinogenicity_iarc"]:
+            fallback = tox_key_aliases.get(key, [])
+            val = self._get_data_value(data, key, fallback)
+            if val:
+                s11.fields[key] = FieldValue(value=val, source="kb")
 
         # 第八部分：职业接触限值
         s8 = self.document.sections[8]
@@ -354,7 +465,13 @@ class SDSGenerator:
         if "易燃" in ghs_text:
             s10.fields["conditions_to_avoid"] = FieldValue(value="明火、高热、静电、火花。", source="kb")
         elif "腐蚀" in ghs_text:
-            s10.fields["conditions_to_avoid"] = FieldValue(value="潮湿环境、水。", source="kb")
+            # 酸类水溶液不应建议"避免潮湿/水"
+            _acid_hints_s10ca = ["酸", "HCl", "H2SO4", "HNO3", "H3PO4", "HF"]
+            _is_acid_s10ca = any(h in str(data.get("chemical_name_cn", "")) or h in str(data.get("molecular_formula", "")) for h in _acid_hints_s10ca)
+            if _is_acid_s10ca:
+                s10.fields["conditions_to_avoid"] = FieldValue(value="高温、明火。", source="kb")
+            else:
+                s10.fields["conditions_to_avoid"] = FieldValue(value="潮湿环境、水。", source="kb")
         else:
             s10.fields["conditions_to_avoid"] = FieldValue(value="明火、高热。", source="kb")
 
@@ -385,8 +502,13 @@ class SDSGenerator:
         # 第三部分：成分
         s3 = self.document.sections[3]
 
-        # 第十二部分：生态
+        # 第十二部分：生态（支持中文key fallback）
         s12 = self.document.sections[12]
+        eco_key_aliases = {
+            "persistence_degradability": ["生物降解性"],
+            "bioaccumulation_bcf": ["BCF生物富集系数"],
+            "mobility_in_soil": ["Koc土壤迁移系数"],
+        }
         eco_mappings = {
             "ecotoxicity_fish_lc50": "ecotoxicity_fish_lc50",
             "ecotoxicity_daphnia_ec50": "ecotoxicity_daphnia_ec50",
@@ -396,11 +518,13 @@ class SDSGenerator:
             "bioaccumulation_log_bc": "bioaccumulation_log_bc",
         }
         for field_key, data_key in eco_mappings.items():
-            val = data.get(data_key)
+            fallback = eco_key_aliases.get(data_key, [])
+            val = self._get_data_value(data, data_key, fallback)
             if val:
                 s12.fields[field_key] = FieldValue(value=val, source="kb")
-        if data.get("mobility_in_soil"):
-            s12.fields["mobility_in_soil"] = FieldValue(value=data["mobility_in_soil"], source="kb")
+        mob_val = self._get_data_value(data, "mobility_in_soil", ["Koc土壤迁移系数"])
+        if mob_val:
+            s12.fields["mobility_in_soil"] = FieldValue(value=mob_val, source="kb")
 
     def set_classification(self, classifications: List[dict]):
         """
@@ -683,55 +807,90 @@ class SDSGenerator:
                 return True
         return False
 
+    def _get_flammability_text(self) -> str:
+        """根据GHS分类生成S9易燃性字段文本"""
+        # 优先检查混合物分类中的易燃性
+        for cls in getattr(self, '_classifications', []):
+            hazard = cls.get("hazard", "")
+            if "易燃" in hazard:
+                h_code = cls.get("h_code", "")
+                h_stmts = self.templates.ghs_mappings.get("h_statements", {})
+                return h_stmts.get(h_code, hazard)
+
+        # NEW-111: 混合物模式 — 即使混合物分类无易燃，检查组分是否有易燃液体分类
+        if getattr(self, '_is_mixture', False):
+            components = getattr(self, '_components_data', [])
+            total_flammable = 0.0
+            for comp in components:
+                ghs_raw = comp.get("ghs_classifications", "")
+                if isinstance(ghs_raw, list):
+                    ghs_text = " ".join(str(g) for g in ghs_raw)
+                else:
+                    ghs_text = str(ghs_raw) if ghs_raw else ""
+                if "易燃液体" in ghs_text or "易燃" in ghs_text:
+                    try:
+                        conc_str = str(comp.get("concentration", "0")).replace("%", "")
+                        total_flammable += float(conc_str)
+                    except (ValueError, TypeError):
+                        pass
+            if total_flammable >= 10:
+                return f"含易燃组分（易燃组分总浓度约{total_flammable:.0f}%），高度易燃液体和蒸气"
+
+        return "不适用"
+
     def _get_chemical_types(self) -> List[str]:
-        """根据GHS分类+物性推断化学品类型标签列表"""
+        """根据GHS分类+物性推断化学品类型标签列表（从JSON规则驱动）"""
         types = set()
         classifications = getattr(self, '_classifications', [])
         ghs_text = " ".join(c.get("hazard", "") for c in classifications)
         kb = getattr(self, '_kb_data', {})
-
-        # 易燃液体（闪点<60°C）
-        if "易燃液体" in ghs_text:
-            types.add("flammable_liquid")
-        # 腐蚀性酸/碱
-        if "皮肤腐蚀" in ghs_text or "金属腐蚀" in ghs_text:
-            # 通过pH或成分区分酸/碱
-            formula = str(kb.get("molecular_formula", ""))
-            name = str(kb.get("chemical_name_cn", ""))
-            acid_hints = ["HCl", "H2SO4", "HNO3", "H3PO4", "HF", "酸"]
-            base_hints = ["NaOH", "KOH", "Ca(OH)2", "NH3", "碱", "氢氧化"]
-            if any(h in formula or h in name for h in acid_hints):
-                types.add("corrosive_acid")
-            elif any(h in formula or h in name for h in base_hints):
-                types.add("corrosive_alkali")
-            else:
-                types.add("corrosive_acid")  # 默认按酸处理
-        # 急性毒性
-        if "急性毒性" in ghs_text:
-            types.add("toxic")
-        # 氧化性
-        if "氧化性" in ghs_text:
-            types.add("oxidizer")
-        # 易燃固体
-        if "易燃固体" in ghs_text:
-            types.add("flammable_solid")
-        # 自反应/爆炸
-        if "自反应" in ghs_text or "爆炸" in ghs_text:
-            types.add("explosive")
-        # 高压气体
-        if "高压气体" in ghs_text or "加压气体" in ghs_text or "液化气体" in ghs_text:
-            types.add("compressed_gas")
-        # 重金属
         formula = str(kb.get("molecular_formula", ""))
-        heavy_metals = ["Pb", "Hg", "Cd", "Cr", "As", "Cu", "Zn", "Ni", "Co"]
+        name = str(kb.get("chemical_name_cn", ""))
+
+        # 从 chemical_type_rules.json 读取检测规则
+        type_rules = self.TYPE_RULES
+
+        # 预先提取酸/碱的hints用于区分
+        acid_formula_hints = []
+        acid_name_hints = []
+        alkali_formula_hints = []
+        alkali_name_hints = []
+        for rule in type_rules.get("type_detection", []):
+            if rule["tag"] == "corrosive_acid":
+                acid_formula_hints = rule.get("formula_hints", [])
+                acid_name_hints = rule.get("name_hints", [])
+            elif rule["tag"] == "corrosive_alkali":
+                alkali_formula_hints = rule.get("formula_hints", [])
+                alkali_name_hints = rule.get("name_hints", [])
+
+        is_acid_hint = any(h in formula or h in name for h in acid_formula_hints + acid_name_hints)
+        is_alkali_hint = any(h in formula or h in name for h in alkali_formula_hints + alkali_name_hints)
+
+        for rule in type_rules.get("type_detection", []):
+            tag = rule["tag"]
+            ghs_kw = rule.get("ghs_keywords", [])
+            # 检查GHS关键词
+            if not any(kw in ghs_text for kw in ghs_kw):
+                continue
+            # 酸碱区分需要额外检查
+            if tag == "corrosive_acid":
+                if is_acid_hint and not is_alkali_hint:
+                    types.add(tag)
+                elif rule.get("default_if_no_base_match") and not is_alkali_hint:
+                    types.add(tag)
+            elif tag == "corrosive_alkali":
+                if is_alkali_hint and not is_acid_hint:
+                    types.add(tag)
+            else:
+                types.add(tag)
+
+        # 重金属检测（从规则读取元素列表）
+        heavy_metals = type_rules.get("heavy_metals", ["Pb","Hg","Cd","Cr","As","Cu","Zn","Ni","Co"])
         if any(el in formula for el in heavy_metals):
             types.add("heavy_metal")
-        # 有机溶剂（含碳 + 易燃）
+        # 有机溶剂
         if "C" in formula and "flammable_liquid" in types:
             types.add("organic_solvent")
-        # 吸入危害
-        if "吸入危害" in ghs_text:
-            types.add("aspiration_hazard")
 
         return list(types) if types else ["general"]
 
@@ -809,9 +968,9 @@ class SDSGenerator:
             f"| UN编号 | {self._val(1, 'un_number')} |\n"
             f"| EC号 | {self._val(1, 'ec_number', '不适用')} |\n"
             f"| IUPAC名称 | {self._val(1, 'iupac_name')} |\n"
-            f"| 推荐用途 | {self._val(1, 'recommended_use', '请咨询供应商')} |\n"
-            f"| 供应商 | {self._val(1, 'supplier_info', '请咨询供应商')} |\n"
-            f"| 应急电话 | {self._val(1, 'emergency_phone', '请咨询供应商')} |"
+            f"| 推荐用途 | {self._val(1, 'recommended_use', '工业用化学品')} |\n"
+            f"| 供应商 | {self._val(1, 'supplier_info', '[待确认]')} |\n"
+            f"| 应急电话 | {self._val(1, 'emergency_phone', '[待确认]')} |"
         )
 
     def generate_section_2(self) -> str:
@@ -1037,7 +1196,7 @@ class SDSGenerator:
         return f"# 第三部分：成分/组成信息\n\n**类型**: {chem_type}\n\n{self._val(3, 'components', '无可用数据 [待确认]')}"
 
     # 急救知识库：按化学品类型提供特异性急救建议
-    _FIRST_AID_KB = {
+    _FIRST_AID_KB_FALLBACK = {
         "corrosive_acid": {
             "inhalation": "立即将患者移至空气新鲜处。如呼吸困难，给予吸氧。如呼吸停止，进行人工呼吸（注意：施救者勿口对口接触腐蚀性气体）。立即就医。",
             "skin": "立即脱去被污染的衣物。用大量流动清水冲洗至少30分钟。不可使用化学中和剂。冲洗时注意不要将化学品扩散到未受影响的皮肤。立即就医。",
@@ -1125,7 +1284,7 @@ class SDSGenerator:
                 primary_type = t
                 break
 
-        kb = self._FIRST_AID_KB.get(primary_type, self._FIRST_AID_KB["general"])
+        kb = self.FIRST_AID_KB.get(primary_type, self.FIRST_AID_KB["general"])
 
         # 混合物模式：聚合所有组分的特异性注释和靶器官建议
         mixture_notes = {"inhalation": [], "skin": [], "eye": [], "ingestion": []}
@@ -1137,7 +1296,7 @@ class SDSGenerator:
         # 注入KB特异性注释（纯物质模式用单组分KB，混合物模式用聚合结果）
         route_map = {}
         for route in ["inhalation", "skin", "eye", "ingestion"]:
-            base = kb.get(route, self._FIRST_AID_KB["general"][route])
+            base = kb.get(route, self.FIRST_AID_KB["general"][route])
             extra_lines = []
             agg_notes = mixture_notes.get(route, [])
             if agg_notes:
@@ -1151,8 +1310,8 @@ class SDSGenerator:
             else:
                 route_map[route] = base
 
-        rescuer = kb.get("rescuer", self._FIRST_AID_KB["general"]["rescuer"])
-        physician = kb.get("physician", self._FIRST_AID_KB["general"]["physician"])
+        rescuer = kb.get("rescuer", self.FIRST_AID_KB["general"]["rescuer"])
+        physician = kb.get("physician", self.FIRST_AID_KB["general"]["physician"])
 
         # 靶器官摘要（混合物模式）
         if getattr(self, '_is_mixture', False):
@@ -1181,7 +1340,7 @@ class SDSGenerator:
         )
 
     # 消防知识库：按化学品类型提供特异性消防建议
-    _FIREFIGHTING_KB = {
+    _FIREFIGHTING_KB_FALLBACK = {
         "flammable_liquid": {
             "hazard": "极易燃。其蒸气与空气可形成爆炸性混合物。蒸气比空气重，能沿地面扩散至远处，遇火源可能引起回燃。容器在火中可能破裂或爆炸。",
             "media": "干粉、二氧化碳、泡沫、水雾。",
@@ -1252,8 +1411,8 @@ class SDSGenerator:
         type_order = ["flammable_liquid", "flammable_solid", "oxidizer", "compressed_gas",
                       "toxic", "corrosive_acid", "corrosive_alkali", "heavy_metal"]
         for t in type_order:
-            if t in chem_types and t in self._FIREFIGHTING_KB:
-                kb = self._FIREFIGHTING_KB[t]
+            if t in chem_types and t in self.FIREFIGHTING_KB:
+                kb = self.FIREFIGHTING_KB[t]
                 if kb["hazard"] not in hazard_parts:
                     hazard_parts.append(kb["hazard"])
                 if kb["media"] not in media_parts:
@@ -1264,7 +1423,7 @@ class SDSGenerator:
                     advice_parts.append(kb["advice"])
 
         if not hazard_parts:
-            kb = self._FIREFIGHTING_KB["general"]
+            kb = self.FIREFIGHTING_KB["general"]
             hazard_parts = [kb["hazard"]]
             media_parts = [kb["media"]]
             prohibited_parts = [kb["prohibited"]]
@@ -1321,11 +1480,14 @@ class SDSGenerator:
         s5_comps = getattr(self, '_components_data', [])
         s5_cas_list = [str(c.get("cas_number", c.get("cas", ""))) for c in s5_comps]
         s5_names = [str(c.get("chemical_name_cn", c.get("name", ""))) for c in s5_comps]
-        s5_has_chlorinated = any(cas in s5_cas_list for cas in ["75-09-2", "67-66-3", "71-55-6", "127-18-4"]) or \
+        _chlorinated_cas = self.TYPE_RULES.get("chlorinated_cas", ["75-09-2", "67-66-3", "71-55-6", "127-18-4"])
+        s5_has_chlorinated = any(cas in s5_cas_list for cas in _chlorinated_cas) or \
                              any("二氯" in n or "三氯" in n or "氯仿" in n for n in s5_names)
         kb5 = getattr(self, '_kb_data', {})
         formula = str(kb5.get("molecular_formula", ""))
-        if s5_has_chlorinated or "Cl" in formula:
+        # DEF-003: 只有含C+Cl的有机物才需要光气警告，无机氯化物（如HCl）不需要
+        is_chlorinated_organic = ("Cl" in formula and "C" in formula) or s5_has_chlorinated
+        if is_chlorinated_organic:
             if "光气" not in decomp_line and "氯化氢" not in decomp_line:
                 decomp_line += "。含氯有机物不完全燃烧可产生光气（碳酰氯）和氯化氢等剧毒气体"
 
@@ -1411,7 +1573,7 @@ class SDSGenerator:
         )
 
     # 操作储存知识库
-    _HANDLING_KB = {
+    _HANDLING_KB_FALLBACK = {
         "flammable_liquid": {
             "handling": "密闭操作，全面通风。操作人员必须经过专门培训，严格遵守操作规程。建议操作人员佩戴过滤式防毒面具（半面罩），戴化学安全防护眼镜，穿防静电工作服，戴橡胶耐油手套。远离火种、热源，工作场所严禁吸烟。使用防爆型的通风系统和设备。防止蒸气泄漏到工作场所空气中。避免与氧化剂、酸类、碱金属接触。灌装时应控制流速，且有接地装置，防止静电积聚。搬运时轻装轻卸，防止包装及容器损坏。配备相应品种和数量的消防器材及泄漏应急处理设备。",
             "storage": "储存于阴凉、通风的专用库房内。远离火种、热源。库温不宜超过37°C，相对湿度不超过80%。保持容器密封。应与氧化剂、还原剂、碱类、食用化学品分开存放，切忌混储。采用防爆型照明、通风设施。禁止使用易产生火花的机械设备和工具。储存区应备有泄漏应急处理设备和合适的收容材料。",
@@ -1454,7 +1616,7 @@ class SDSGenerator:
                 primary_type = t
                 break
 
-        kb = self._HANDLING_KB.get(primary_type, self._HANDLING_KB["general"])
+        kb = self.HANDLING_KB.get(primary_type, self.HANDLING_KB["general"])
         handling = kb["handling"]
         storage = kb["storage"]
         incompatibles = self._val(10, 'incompatible_materials', '强氧化剂、强酸、强碱 [待确认]')
@@ -1473,14 +1635,36 @@ class SDSGenerator:
         is_toxic = self._has_classification("急性毒性")
         is_flammable = self._has_classification("易燃")
 
-        # 职业接触限值
+        # 职业接触限值（DEF-108: 中文标签+单位）
+        _oel_label_map = {
+            "pc_twa": "PC-TWA",
+            "pc_stel": "PC-STEL",
+            "acgih_tlv_twa": "ACGIH TLV-TWA",
+            "acgih_tlv_stel": "ACGIH TLV-STEL",
+            "mac": "MAC",
+        }
         oel_text = ""
         if isinstance(s8.fields.get('oel_table'), FieldValue):
             oel = s8.fields['oel_table'].value
             if isinstance(oel, dict):
-                oel_text = "| 标准 | 限值类型 | 数值 |\n|------|---------|------|\n"
+                oel_text = "| 限值类型 | 数值 |\n|---------|------|\n"
                 for key, val in oel.items():
-                    oel_text += f"| {key} | - | {val} |\n"
+                    # 将内部key转为中文标签
+                    label = key
+                    # NEW-112: 提取混合物组分名（键格式如 "pc_twa[氢氧化钠]"）
+                    comp_name = ""
+                    bracket_match = re.search(r'\[(.+)\]$', key)
+                    if bracket_match:
+                        comp_name = bracket_match.group(1)
+                    for pattern, cn_label in _oel_label_map.items():
+                        if pattern in key:
+                            label = f"{cn_label}（{comp_name}）" if comp_name else cn_label
+                            break
+                    # 格式化数值：如果纯数字则追加 mg/m³
+                    val_str = str(val)
+                    if re.match(r'^[\d.]+$', val_str.strip()):
+                        val_str = f"{val_str.strip()} mg/m³"
+                    oel_text += f"| {label} | {val_str} |\n"
 
         if not oel_text:
             oel_text = "无可用数据 [待确认]"
@@ -1515,7 +1699,45 @@ class SDSGenerator:
         # pH值（有值时插入在外观/气味之后）
         ph_row = ""
         ph_val = self._val(9, 'ph_value', '')
-        if ph_val and ph_val != '无可用数据 [待确认]':
+        if not ph_val or '[待确认]' in ph_val or ph_val == '无可用数据':
+            # NEW-115: 根据化学品类型推断pH
+            chem_types_s9 = self._get_chemical_types()
+            kb_s9 = getattr(self, '_kb_data', {})
+            formula_s9 = str(kb_s9.get("molecular_formula", ""))
+            if "corrosive_acid" in chem_types_s9:
+                ph_val = "<1 (强酸性)"
+            elif "corrosive_alkali" in chem_types_s9:
+                ph_val = ">13 (强碱性)"
+            elif getattr(self, '_is_mixture', False):
+                # 混合物：检查是否有酸/碱组分
+                comp_types = set()
+                for comp in getattr(self, '_components_data', []):
+                    comp_ghs = comp.get("ghs_classifications", [])
+                    if isinstance(comp_ghs, str):
+                        comp_ghs = [comp_ghs]
+                    comp_ghs_text = " ".join(str(g) for g in comp_ghs)
+                    if "腐蚀" in comp_ghs_text:
+                        comp_formula = str(comp.get("molecular_formula", ""))
+                        acid_hints = ["HCl", "H2SO4", "HNO3", "H3PO4", "HF"]
+                        alkali_hints = ["NaOH", "KOH", "Ca(OH)2", "NH3"]
+                        if any(h in comp_formula for h in acid_hints):
+                            comp_types.add("acid")
+                        elif any(h in comp_formula for h in alkali_hints):
+                            comp_types.add("alkali")
+                if "acid" in comp_types:
+                    ph_val = "酸性（需实测）"
+                elif "alkali" in comp_types:
+                    ph_val = "碱性（需实测）"
+                else:
+                    ph_val = "需实测"
+            else:
+                # 中性有机物：乙醇、丙酮等
+                neutral_organics = ["C2H6O", "C3H6O", "C6H12O", "C4H10O"]
+                if formula_s9 in neutral_organics:
+                    ph_val = "约7 (中性)"
+                else:
+                    ph_val = "需实测"
+        if ph_val and ph_val != '无可用数据 [待确认]' and '[待确认]' not in ph_val:
             ph_row = f"| pH值 | {ph_val} |\n"
 
         # 补充缺失行：嗅觉阈值、pH、凝固点、蒸发速率、相对蒸气密度、分解温度、动态粘度、爆炸特性、氧化性、分子量
@@ -1528,6 +1750,34 @@ class SDSGenerator:
                 val = self._strip_unit(val)
             return f"| {label} | {val} {unit} |\n"
 
+        # 蒸气压：自动检测hPa→kPa转换（裸数值>50可能是hPa单位）
+        def _normalize_vp(vp_str):
+            if not vp_str or '待确认' in vp_str or '不适用' in vp_str or '无可用' in vp_str:
+                return vp_str
+            vp_str = str(vp_str).strip()
+            # 先移除HTML注释（来源标注）
+            vp_str = re.sub(r'\s*<!--.*?-->\s*', '', vp_str).strip()
+            if 'kPa' in vp_str:
+                return vp_str.replace('kPa', '').strip()
+            # 纯数值：>50 → 可能是hPa，除以10转kPa
+            try:
+                val = float(vp_str)
+                if val > 50:
+                    return f"{val/10:.1f}"
+                return f"{val:.2f}" if val < 1 else f"{val:.1f}"
+            except (ValueError, TypeError):
+                return vp_str
+
+        vp_display = _normalize_vp(_s9('vapor_pressure'))
+        _expl_raw = self._val(9, 'explosion_limits', '')
+        _lel, _uel = '无可用数据', '无可用数据'
+        if _expl_raw and '待确认' not in _expl_raw and '无可用' not in _expl_raw:
+            # 支持 "3.3%~19.0%", "3.3%-19.0%", "2.5 ~ 13.0 (vol%)" 等格式
+            _m = re.search(r'([\d.]+)\s*%?\s*[~〜\-—–]\s*%?\s*([\d.]+)', _expl_raw)
+            if _m:
+                _lel, _uel = _m.group(1) + '%', _m.group(2) + '%'
+            else:
+                _lel = _expl_raw
         return (
             f"# 第九部分：理化特性\n\n"
             f"| 特性 | 数值 |\n|------|------|\n"
@@ -1540,10 +1790,10 @@ class SDSGenerator:
             f"| 沸点 | {_s9('boiling_point')} °C |\n"
             f"| 闪点 | {_s9('flash_point')} °C |\n"
             f"| 蒸发速率 | 无可用数据 |\n"
-            f"| 易燃性 | 不适用 |\n"
-            f"| 爆炸下限 | 无可用数据 |\n"
-            f"| 爆炸上限 | 无可用数据 |\n"
-            f"| 蒸气压 | {_s9('vapor_pressure')} kPa |\n"
+            f"| 易燃性 | {self._get_flammability_text()} |\n"
+            f"| 爆炸下限 | {_lel} |\n"
+            f"| 爆炸上限 | {_uel} |\n"
+            f"| 蒸气压 | {vp_display}{' kPa' if vp_display and '无可用' not in str(vp_display) and '不适用' not in str(vp_display) else ''} |\n"
             f"| 相对蒸气密度 | 无可用数据 |\n"
             f"| 密度 | {_s9('density')} g/cm³ |\n"
             f"| 溶解性 | {self._val(9, 'solubility', '无可用数据 [待确认]')} |\n"
@@ -1556,55 +1806,36 @@ class SDSGenerator:
         )
 
     def _infer_decomposition_products(self) -> str:
-        """从分子式推断可能的危险分解产物"""
+        """从分子式推断可能的危险分解产物（规则从 chemical_type_rules.json 读取）"""
         formula = str(getattr(self, '_kb_data', {}).get("molecular_formula", ""))
         products = []
         if not formula:
             return ""
 
-        elements = set()
-        # 简单元素检测（处理常见化学式）
-        if "C" in formula and "H" in formula:
-            elements.add("碳氢")
-        if "N" in formula:
-            elements.add("氮")
-        if "S" in formula:
-            elements.add("硫")
-        if "Cl" in formula:
-            elements.add("氯")
-        if "F" in formula:
-            elements.add("氟")
-        if "Br" in formula:
-            elements.add("溴")
-        if "CN" in formula or (formula.count("C") >= 1 and "N" in formula):
-            elements.add("氰")
-        if "P" in formula and "O" in formula:
-            elements.add("磷")
-        # 金属
-        for metal in ["Pb", "Hg", "Cd", "Cr", "Cu", "Zn", "Ni", "Al", "Fe", "Na", "K", "Ca", "Mg"]:
-            if metal in formula:
-                elements.add("金属")
-                break
+        type_rules = self.TYPE_RULES
+        decomposition_rules = type_rules.get("decomposition_rules", [])
+        decomposition_metals = type_rules.get("decomposition_metals",
+            ["Pb", "Hg", "Cd", "Cr", "Cu", "Zn", "Ni", "Al", "Fe", "Na", "K", "Ca", "Mg"])
+        has_carbon_hydrogen = "C" in formula and "H" in formula
 
-        if "碳氢" in elements:
-            products.append("一氧化碳")
-            products.append("二氧化碳")
-        if "氮" in elements:
-            products.append("氮氧化物")
-        if "硫" in elements:
-            products.append("二氧化硫")
-        if "氯" in elements:
-            products.append("氯化氢")
-        if "氟" in elements:
-            products.append("氟化氢")
-        if "溴" in elements:
-            products.append("溴化氢")
-        if "氰" in elements and "碳氢" not in elements:
-            products.append("氰化氢")
-        if "磷" in elements:
-            products.append("磷氧化物")
-        if "金属" in elements:
-            products.append("金属氧化物")
+        matched_elements = set()
+        for rule in decomposition_rules:
+            elems = rule.get("elements", [])
+            exclude = rule.get("exclude_elements", [])
+            if all(e in formula for e in elems):
+                if exclude and has_carbon_hydrogen and all(e in formula for e in exclude):
+                    continue
+                matched_elements.update(elems)
+                for p in rule.get("products", []):
+                    if p not in products:
+                        products.append(p)
+
+        # 金属氧化物
+        for metal in decomposition_metals:
+            if metal in formula:
+                if "金属氧化物" not in products:
+                    products.append("金属氧化物")
+                break
 
         if products:
             return "、".join(products)
@@ -1655,14 +1886,24 @@ class SDSGenerator:
         kb10 = getattr(self, '_kb_data', {})
         formula10 = str(kb10.get("molecular_formula", ""))
         # 检查是否含氯组分（通过CAS号或名称判断）
-        has_chlorinated = any(cas in comp_cas for cas in ["75-09-2", "67-66-3", "71-55-6", "127-18-4"]) or \
-                          any("二氯" in n or "三氯" in n or "氯仿" in n or "氯乙烯" in n for n in comp_names) or \
-                          "Cl" in formula10
+        _chlorinated_cas_s10 = self.TYPE_RULES.get("chlorinated_cas", ["75-09-2", "67-66-3", "71-55-6", "127-18-4"])
+        has_chlorinated = any(cas in comp_cas for cas in _chlorinated_cas_s10) or \
+                          any("二氯" in n or "三氯" in n or "氯仿" in n or "氯乙烯" in n for n in comp_names)
+        # 纯物质模式：检查分子式是否含有机C和Cl（排除无机物如HCl、NaCl）
+        if not has_chlorinated and formula10:
+            has_standalone_c = bool(re.search(r'C(?!l|a|o|u|r)', formula10))
+            has_chlorinated = "Cl" in formula10 and has_standalone_c
         reaction_notes = []
         # 腐蚀品与酸类/水等剧烈反应
         incompat_lower = incompatibles.lower() if incompatibles else ""
+        chem_types_s10 = self._get_chemical_types()
+        is_acid = "corrosive_acid" in chem_types_s10
+        is_alkali = "corrosive_alkali" in chem_types_s10
         if "酸" in incompat_lower:
-            reaction_notes.append(f"与酸类接触可发生剧烈反应。")
+            if is_acid:
+                reaction_notes.append("与碱类接触可发生剧烈反应。")
+            else:
+                reaction_notes.append("与酸类接触可发生剧烈反应。")
         if "水" in incompat_lower and ("腐蚀" in all_ghs_s10 or "碱" in str(comp_names)):
             reaction_notes.append("遇水剧烈放热，可能引起飞溅。")
         if has_chlorinated:
@@ -1690,9 +1931,15 @@ class SDSGenerator:
             # 生成基于禁配物的危险反应描述
             basic_reactions = []
             if "酸" in incompat_lower:
-                basic_reactions.append("与酸类接触可发生剧烈反应。")
+                if is_acid:
+                    basic_reactions.append("与碱类接触可发生剧烈反应。")
+                else:
+                    basic_reactions.append("与酸类接触可发生剧烈反应。")
             if "碱" in incompat_lower:
-                basic_reactions.append("与碱类接触可发生反应。")
+                if is_alkali:
+                    basic_reactions.append("与酸类接触可发生剧烈反应。")
+                else:
+                    basic_reactions.append("与碱类接触可发生反应。")
             if "氧化" in incompat_lower:
                 basic_reactions.append("与强氧化剂接触可发生剧烈反应，有火灾和爆炸危险。")
             if "水" in incompat_lower:
@@ -1714,7 +1961,7 @@ class SDSGenerator:
         )
 
     # 毒理学症状知识库：基于GHS分类自动推断主要症状
-    _TOX_SYMPTOMS_KB = {
+    _TOX_SYMPTOMS_KB_FALLBACK = {
         "急性毒性-经口": "误食可引起恶心、呕吐、腹痛。严重时可导致意识障碍、呼吸困难、器官损伤。",
         "急性毒性-经皮": "皮肤接触可引起刺激、红肿。大面积接触可导致系统性中毒。",
         "急性毒性-吸入": "吸入蒸气或雾可引起呼吸道刺激、咳嗽、呼吸困难。高浓度暴露可导致头晕、头痛、恶心，严重时可引起意识丧失。",
@@ -1739,8 +1986,47 @@ class SDSGenerator:
         """第十一部分：毒理学信息"""
         s11 = self.document.sections[11]
 
+        # NEW-118: 皮肤腐蚀/刺激字段与S2 GHS分类一致性校验
+        # 当S2分类中无皮肤腐蚀/刺激时，不应在S11显示KB的皮肤数据
+        s2_ghs_classes = self.document.sections[2].fields.get("ghs_classifications")
+        s2_has_skin = False
+        if s2_ghs_classes:
+            ghs_list = s2_ghs_classes.value if s2_ghs_classes else []
+            s2_has_skin = any(
+                "皮肤腐蚀" in str(c) or "皮肤刺激" in str(c)
+                for c in ghs_list
+            )
+        if not s2_has_skin and "skin_corrosion_category" in s11.fields:
+            # 检查来源：如果是classification则保留（由分类系统设置），否则删除
+            src = s11.fields["skin_corrosion_category"].source
+            if src != "classification":
+                del s11.fields["skin_corrosion_category"]
+
+        # NEW-118: 严重眼损伤/眼刺激同理
+        s2_has_eye = False
+        if s2_ghs_classes:
+            ghs_list = s2_ghs_classes.value if s2_ghs_classes else []
+            s2_has_eye = any(
+                "眼损伤" in str(c) or "眼刺激" in str(c)
+                for c in ghs_list
+            )
+        if not s2_has_eye and "eye_damage_category" in s11.fields:
+            src = s11.fields["eye_damage_category"].source
+            if src != "classification":
+                del s11.fields["eye_damage_category"]
+
         def tox_field(key, label):
             val = self._val(11, key, "无可用数据 [待确认]")
+            # DEF-109: 自动追加单位（裸数值时补充mg/kg或mg/L）
+            if val and "无可用数据" not in val and "待确认" not in val:
+                # 移除来源注释后检查
+                clean = re.sub(r'\s*<!--.*?-->\s*', '', str(val)).strip()
+                has_unit = any(u in clean for u in ["mg/kg", "mg/L", "ppm", "g/kg"])
+                if not has_unit and clean and clean != "不适用":
+                    if "ld50" in key.lower() or "oral" in key or "dermal" in key:
+                        val = val.rstrip() + " mg/kg"
+                    elif "lc50" in key.lower() or "inhalation" in key:
+                        val = val.rstrip() + " mg/L"
             return f"**{label}**: {val}"
 
         # 检测是否为混合物模式
@@ -1750,7 +2036,7 @@ class SDSGenerator:
         symptom_lines = []
         for cls in getattr(self, '_classifications', []):
             hazard = cls.get("hazard", "")
-            for key, desc in self._TOX_SYMPTOMS_KB.items():
+            for key, desc in self.TOX_SYMPTOMS_KB.items():
                 # 模糊匹配分类名
                 key_parts = key.replace("STOT-", "").replace("单次", "").replace("反复", "").split("-")
                 if any(kp in hazard for kp in key_parts if len(kp) > 1):
@@ -1768,20 +2054,26 @@ class SDSGenerator:
             if note_val and "待确认" not in note_val:
                 notes_lines.append(f"**{label}**: {note_val}")
 
-        # 自动推断的吸入危害
+        # 自动推断的吸入危害（DEF-003: 增加化学品类型检查，无机物不使用有机液体模板）
         aspiration = self._val(11, 'aspiration_hazard', '')
         if "待确认" in aspiration:
-            # 低粘度有机液体自动标注
             kb = getattr(self, '_kb_data', {})
             formula = str(kb.get("molecular_formula", ""))
             bp = str(kb.get("boiling_point", ""))
-            if "C" in formula and "H" in formula:
+            name_cn = str(kb.get("chemical_name_cn", ""))
+            # 判断是否为有机物：需含C且含H，且不是无机酸/碱/盐
+            is_organic = ("C" in formula and "H" in formula)
+            inorganic_hints = ["酸", "碱", "盐", "氧化钙", "次氯酸", "氯酸钠"]
+            is_inorganic = any(h in name_cn for h in inorganic_hints)
+            if is_organic and not is_inorganic:
                 try:
                     bp_num = float(re.search(r'-?[\d.]+', bp).group())
                     if bp_num > 0 and bp_num < 300:  # 低沸点有机液体
                         aspiration = "低粘度有机液体，误吸可引起化学性肺炎。（推断值）"
                 except (ValueError, AttributeError):
                     pass
+            elif is_inorganic:
+                aspiration = ""  # 无机物不标注吸入危害（待人工确认）
 
         symptoms_text = ""
         if symptom_lines:
@@ -1872,13 +2164,20 @@ class SDSGenerator:
         # 持久性和降解性
         persistence = self._val(12, 'persistence_degradability')
 
-        # 生物富集
+        # 生物富集（DEF-008: 修复条件逻辑，任一字段有效即显示）
         bioaccum_text = self._val(12, 'bioaccumulation_potential', '')
-        if not bioaccum_text or "无可用" in bioaccum_text:
+        if not bioaccum_text or "无可用" in bioaccum_text or "待确认" in bioaccum_text:
             bcf = self._val(12, 'bioaccumulation_bcf')
             log_bc = self._val(12, 'bioaccumulation_log_bc')
-            if "待确认" not in bcf or "待确认" not in log_bc:
-                bioaccum_text = f"BCF: {bcf}; LogBC: {log_bc}"
+            bcf_valid = bcf and "待确认" not in bcf and "无可用" not in bcf and "不适用" not in bcf
+            log_bc_valid = log_bc and "待确认" not in log_bc and "无可用" not in log_bc
+            if bcf_valid or log_bc_valid:
+                parts = []
+                if bcf_valid:
+                    parts.append(f"BCF: {bcf}")
+                if log_bc_valid:
+                    parts.append(f"LogBC: {log_bc}")
+                bioaccum_text = "；".join(parts)
             else:
                 bioaccum_text = "无可用数据 [待确认]"
 
@@ -1894,7 +2193,7 @@ class SDSGenerator:
         )
 
     # 废弃处置知识库
-    _DISPOSAL_KB = {
+    _DISPOSAL_KB_FALLBACK = {
         "flammable_liquid": {
             "method": "焚烧处理。焚烧炉应配备洗涤器和粉尘捕集装置，确保尾气达标排放。严禁倒入下水道。委托有资质的危险废物处理单位处理。",
             "container": "将废弃容器交由有资质的危险废物处理单位处理。容器倒空后可能仍有残留液体和易燃蒸气，应保持通风，远离火源。不得切割、焊接空容器。",
@@ -1963,7 +2262,47 @@ class SDSGenerator:
                 primary_type = t
                 break
 
-        kb = self._DISPOSAL_KB.get(primary_type, self._DISPOSAL_KB["general"])
+        kb = self.DISPOSAL_KB.get(primary_type, self.DISPOSAL_KB["general"])
+
+        # NEW-113: 混合物模式 — 基于组分GHS分类生成组分特异性废物类别
+        extra_waste_notes = ""
+        if getattr(self, '_is_mixture', False):
+            components = getattr(self, '_components_data', [])
+            waste_codes = []
+            has_aquatic_toxicity = False
+            for comp in components:
+                ghs_raw = comp.get("ghs_classifications", "")
+                if isinstance(ghs_raw, list):
+                    ghs_text = " ".join(str(g) for g in ghs_raw)
+                else:
+                    ghs_text = str(ghs_raw) if ghs_raw else ""
+                # 碱类 → HW35
+                cn_name = str(comp.get("chemical_name_cn", ""))
+                if "腐蚀" in ghs_text and \
+                   any(h in cn_name for h in ["氢氧化", "氢氧化钠", "氢氧化钾", "氢氧化钙"]):
+                    if "HW35（废碱）" not in waste_codes:
+                        waste_codes.append("HW35（废碱）")
+                # 酸类 → HW34
+                formula = str(comp.get("molecular_formula", ""))
+                if any(kw in ghs_text for kw in ["皮肤腐蚀", "金属腐蚀"]) and \
+                   any(h in formula for h in ["HCl", "H2SO4", "HNO3", "HF"]):
+                    if "HW34（废酸）" not in waste_codes:
+                        waste_codes.append("HW34（废酸）")
+                # 有机溶剂 → HW06
+                if ("C" in formula and "H" in formula) and \
+                   any(kw in ghs_text for kw in ["易燃液体", "易燃"]):
+                    if "HW06（有机溶剂废物）" not in waste_codes:
+                        waste_codes.append("HW06（有机溶剂废物）")
+                # 水生毒性
+                if "水生" in ghs_text:
+                    has_aquatic_toxicity = True
+            # 去重
+            waste_codes = list(dict.fromkeys(waste_codes))
+            if waste_codes:
+                extra_waste_notes = "\n\n**废物类别（根据组分推断）**: " + "、".join(waste_codes) + \
+                    "\n\n**注意**: 混合物废弃物应按照各组分对应的最高危险废物类别进行管理。"
+            if has_aquatic_toxicity:
+                extra_waste_notes += "\n\n**环境警示**: 本品含对水生环境有害组分，废弃处置时应防止进入水体和下水道。"
 
         return (
             f"# 第十三部分：废弃处置\n\n"
@@ -1971,44 +2310,52 @@ class SDSGenerator:
             f"**容器处理**: {kb['container']}\n\n"
             f"**适用的法规**: {kb['regulation']}\n\n"
             f"**注意事项**: {kb['note']}"
+            f"{extra_waste_notes}"
         )
 
     def generate_section_14(self) -> str:
-        """第十四部分：运输信息"""
+        """第十四部分：运输信息（DEF-111: 支持多重危险性）"""
         s14 = self.document.sections[14]
 
-        # 运输类别：优先KB数据，fallback从GHS分类推导
-        transport_class = self._val(14, 'transport_class', '')
-        if not transport_class or "待确认" in transport_class:
-            transport_class = self._infer_transport_class()
-        if not transport_class:
+        # 从GHS分类推导运输信息（含多重危险）
+        transport_info = self._infer_transport_info()
+
+        # 运输类别：优先KB数据，fallback推导结果
+        kb_transport_class = self._val(14, 'transport_class', '')
+        if kb_transport_class and "待确认" not in kb_transport_class:
+            transport_class = kb_transport_class
+        elif transport_info["primary"]:
+            if transport_info["multi_hazard"] and transport_info["secondary"]:
+                transport_class = f"{transport_info['primary']}（主要），{transport_info['secondary']}（次要）"
+            else:
+                transport_class = transport_info["primary"]
+        else:
             transport_class = "无可用数据 [待确认]"
 
-        # 运输名称：优先KB，fallback按类别推导
+        # UN编号：优先KB，fallback多重危险UN号
+        un_number = self._val(14, 'un_number', '')
+        if (not un_number or "待确认" in un_number) and transport_info["un_number"]:
+            un_number = f"UN {transport_info['un_number']}"
+
+        # 运输名称：优先KB，fallback推导结果
         shipping_name = self._val(14, 'proper_shipping_name', '')
         if not shipping_name or "待确认" in shipping_name:
-            tc = transport_class if "待确认" not in transport_class else ""
-            if tc == "3":
-                shipping_name = "易燃液体，未另作规定的"
-            elif tc == "8":
-                shipping_name = "腐蚀性物质"
-            elif tc == "2.1" or tc == "2.2" or tc == "2.3":
-                shipping_name = "气体"
-            elif tc == "4.1":
-                shipping_name = "易燃固体"
-            elif tc == "5.1":
-                shipping_name = "氧化性物质"
-            elif tc == "6.1":
-                shipping_name = "毒性物质"
-            elif tc == "9":
-                shipping_name = "环境危害物质"
+            if transport_info["shipping_name"]:
+                shipping_name = transport_info["shipping_name"]
             else:
-                shipping_name = "无可用数据 [待确认]"
+                tc = transport_info["primary"]
+                name_map = {
+                    "3": "易燃液体，未另作规定的", "8": "腐蚀性物质",
+                    "2.2": "气体", "4.1": "易燃固体",
+                    "5.1": "氧化性物质", "6.1": "毒性物质",
+                    "9": "环境危害物质"
+                }
+                shipping_name = name_map.get(tc, "无可用数据 [待确认]")
 
         # 基本信息表格
         basic_table = (
             f"| 项目 | 内容 |\n|------|------|\n"
-            f"| UN编号 | {self._val(14, 'un_number', '无可用数据 [待确认]')} |\n"
+            f"| UN编号 | {un_number if un_number else '无可用数据 [待确认]'} |\n"
             f"| 正式运输名称 | {shipping_name} |\n"
             f"| 运输危险类别 | {transport_class} |\n"
             f"| 包装类别 | {self._val(14, 'packing_group', '无可用数据 [待确认]')} |\n"
@@ -2016,17 +2363,17 @@ class SDSGenerator:
         )
 
         # 运输方式分段
-        is_regulated = "待确认" not in transport_class
-        un_raw = self._val(14, 'un_number', '')
-        # 去掉已有的"UN "前缀避免重复
-        un_clean = un_raw.replace("UN ", "").replace("UN", "") if un_raw else ""
+        is_regulated = "待确认" not in transport_class and transport_info["primary"]
+        un_clean = un_number.replace("UN ", "").replace("UN", "") if un_number else ""
         if is_regulated:
-            # 有运输类别的化学品：按运输方式给出分类
-            road_rail = f"危险类别 {transport_class}，{shipping_name}。"
-            sea = f"IMDG: 危险类别 {transport_class}，UN {un_clean}，{shipping_name}。"
-            air = f"IATA/ICAO: 危险类别 {transport_class}，UN {un_clean}，{shipping_name}。"
+            if transport_info["multi_hazard"] and transport_info["secondary"]:
+                hazard_desc = f"主要危险类别 {transport_info['primary']}，次要危险类别 {transport_info['secondary']}"
+            else:
+                hazard_desc = f"危险类别 {transport_class}"
+            road_rail = f"{hazard_desc}，{shipping_name}。"
+            sea = f"IMDG: {hazard_desc}，UN {un_clean}，{shipping_name}。"
+            air = f"IATA/ICAO: {hazard_desc}，UN {un_clean}，{shipping_name}。"
         else:
-            # 未受管制的化学品
             road_rail = "不受危险货物规则限制。"
             sea = "不受海运危险货物规则限制 (Not regulated for transport)。"
             air = "不受空运危险货物规则限制 (Not regulated for transport)。"
@@ -2040,8 +2387,18 @@ class SDSGenerator:
             f"*此信息未计划传达所有关于此产品的特殊法规或操作要求。运输分类可能因容器体积和地区法规而不同。*"
         )
 
-    def _infer_transport_class(self) -> str:
-        """从GHS分类推导运输类别"""
+    def _infer_transport_info(self) -> dict:
+        """从GHS分类推导运输信息，支持多重危险性（DEF-111）
+
+        Returns:
+            dict: {
+                "primary": "8",          # 主要危险类别
+                "secondary": "3",        # 次要危险类别（无则为""）
+                "un_number": "2924",     # UN编号
+                "shipping_name": "...",  # 正式运输名称
+                "multi_hazard": True     # 是否多重危险
+            }
+        """
         ghs_list = []
         s2 = self.document.sections.get(2)
         if s2 and isinstance(s2.fields.get('ghs_classifications'), FieldValue):
@@ -2050,35 +2407,116 @@ class SDSGenerator:
             ghs_list = []
         ghs_text = " ".join(str(g) for g in ghs_list)
 
-        # 按优先级匹配（腐蚀>毒性>易燃>气体>氧化>环境）
-        # 按主危险优先级匹配（易燃液体优先于腐蚀）
-        if "易燃液体" in ghs_text:
-            return "3"
-        if "易燃固体" in ghs_text or "自热" in ghs_text:
-            return "4.1"
-        if "加压气体" in ghs_text or ("气体" in ghs_text and "液化" not in ghs_text):
-            return "2.2"
-        if "氧化性" in ghs_text:
-            return "5.1"
-        if "急性毒性" in ghs_text:
-            return "6.1"
-        if "腐蚀" in ghs_text:
-            return "8"
-        if "水生环境" in ghs_text or "环境" in ghs_text:
-            return "9"
-        return ""
+        # 收集所有匹配的运输类别
+        transport_mapping = self.TYPE_RULES.get("transport_class_mapping", [])
+        matched_classes = []
+        for rule in transport_mapping:
+            keywords = rule.get("ghs_keywords", [])
+            if any(kw in ghs_text for kw in keywords):
+                cls = rule.get("class", "")
+                if cls and cls not in matched_classes:
+                    matched_classes.append(cls)
+
+        # 检查多重危险组合
+        multi_hazard_rules = self.TYPE_RULES.get("transport_multi_hazard", [])
+        for rule in multi_hazard_rules:
+            if set(rule["classes"]).issubset(set(matched_classes)):
+                return {
+                    "primary": rule["primary"],
+                    "secondary": rule.get("secondary", ""),
+                    "un_number": rule["un_number"],
+                    "shipping_name": rule["shipping_name"],
+                    "multi_hazard": True
+                }
+
+        # 单一危险：返回首个匹配
+        if matched_classes:
+            primary_cls = matched_classes[0]
+            shipping = ""
+            for rule in transport_mapping:
+                if rule.get("class") == primary_cls:
+                    shipping = rule.get("shipping_name", "")
+                    break
+            return {
+                "primary": primary_cls,
+                "secondary": "",
+                "un_number": "",
+                "shipping_name": shipping,
+                "multi_hazard": False
+            }
+
+        return {"primary": "", "secondary": "", "un_number": "",
+                "shipping_name": "", "multi_hazard": False}
 
     def generate_section_15(self) -> str:
-        """第十五部分：法规信息"""
+        """第十五部分：法规信息（DEF-115: 按危害类型动态匹配法规）"""
         s15_template = self.templates.get_section_template(15)
         defaults = s15_template.get("defaults", {}) if s15_template else {}
         cn_regs = defaults.get("cn_regulations", [])
 
+        # 基于GHS分类动态匹配专项法规
+        ghs_text = " ".join(
+            c.get("hazard", "") for c in getattr(self, '_classifications', [])
+        )
+        extra_regs = []
+        if "易燃" in ghs_text:
+            extra_regs.append("《危险化学品安全管理条例》（国务院令第591号）")
+            extra_regs.append("《易制毒化学品管理条例》（针对特定有机溶剂）")
+        if "腐蚀" in ghs_text:
+            extra_regs.append("《危险化学品安全管理条例》（国务院令第591号）")
+        if "致癌" in ghs_text or "致突变" in ghs_text:
+            extra_regs.append("《职业病防治法》— 致癌物职业接触管理")
+        if "急性毒性" in ghs_text:
+            extra_regs.append("《剧毒化学品购买和公路运输许可证件管理办法》")
+        if "水生" in ghs_text or "环境" in ghs_text:
+            extra_regs.append("《水污染防治法》— 环境危害物质排放管理")
+
+        # NEW-117: 易制毒化学品管理条例 — 按CAS号匹配
+        _YZD_CAS = {
+            "7647-01-0": "盐酸",
+            "7664-93-9": "硫酸",
+            "67-64-1": "丙酮",
+            "108-94-1": "环己酮",
+            "74-89-5": "甲胺",
+            "79-03-3": "溴代丙酮",
+            "109-99-9": "四氢呋喃",
+            "78-93-3": "丁酮",
+            "141-78-6": "乙酸乙酯",
+        }
+        cas_yzd = getattr(self, '_kb_data', {}).get("cas_number", "")
+        if cas_yzd in _YZD_CAS:
+            reg_yzd = f"《易制毒化学品管理条例》— {_YZD_CAS[cas_yzd]}属于易制毒化学品"
+            if reg_yzd not in extra_regs:
+                extra_regs.append(reg_yzd)
+        # 混合物：检查组分CAS
+        if getattr(self, '_is_mixture', False):
+            for comp in getattr(self, '_components_data', []):
+                comp_cas = comp.get("cas_number", "")
+                if comp_cas in _YZD_CAS:
+                    reg_yzd = f"《易制毒化学品管理条例》— 含{_YZD_CAS[comp_cas]}(易制毒化学品)"
+                    if reg_yzd not in extra_regs:
+                        extra_regs.append(reg_yzd)
+
+        # 国际法规（按危害类型）
+        intl_regs = [
+            "联合国《全球化学品统一分类和标签制度》（GHS Rev.9）",
+            "ADR/RID（《国际公路/铁路危险货物运输协定》）",
+            "IMDG Code（《国际海运危险货物规则》）",
+            "IATA-DGR（《国际空运危险货物规则》）",
+        ]
+        if "易燃" in ghs_text:
+            intl_regs.append("GB 50016《建筑设计防火规范》")
+        if "腐蚀" in ghs_text:
+            intl_regs.append("GB 30000.2-2013《化学品分类和标签规范 第2部分：爆炸物》等系列标准")
+
+        all_cn = list(cn_regs) + [r for r in extra_regs if r not in cn_regs]
+
         return (
             f"# 第十五部分：法规信息\n\n"
             f"**中国法规**:\n" +
-            "\n".join(f"- {r}" for r in cn_regs) +
-            f"\n\n**国际法规**: 参见相关国际运输法规（ADR/IMDG/IATA-DGR）。"
+            "\n".join(f"- {r}" for r in all_cn) +
+            f"\n\n**国际法规**:\n" +
+            "\n".join(f"- {r}" for r in intl_regs)
         )
 
     def generate_section_16(self) -> str:
@@ -2110,7 +2548,7 @@ class SDSGenerator:
         return (
             f"# 第十六部分：其他信息\n\n"
             f"| 项目 | 内容 |\n|------|------|\n"
-            f"| SDS编号 | AUTO-{datetime.now().strftime('%Y%m%d%H%M%S')} |\n"
+            f"| SDS编号 | AUTO-{datetime.now().strftime('%Y%m%d%H%M%S')}-{hash(str(self._kb_data.get('cas_number', ''))) % 10000:04d} |\n"
             f"| 版本号 | {version} |\n"
             f"| 编制日期 | {now} |\n"
             f"| 修订日期 | {rev_date} |\n\n"
@@ -2207,11 +2645,27 @@ def generate_pure_sds(kb_data: dict, product_name: str = "",
             })
         gen.set_classification(classifications)
 
-    # 成分
+    # 成分（DEF-007: 根据化学品类型设置合理浓度）
+    cas = kb_data.get("cas_number", "")
+    formula = kb_data.get("molecular_formula", "")
+    name_cn = kb_data.get("chemical_name_cn", product_name)
+    # 常见水溶液的典型浓度（从 chemical_type_rules.json 读取，带回退）
+    _sol_conc_rules = {}
+    try:
+        import os, json as _json
+        _rules_path = os.path.join(os.path.dirname(__file__), '..', 'db', 'chemical_type_rules.json')
+        with open(_rules_path, 'r', encoding='utf-8') as _f:
+            _sol_conc_rules = _json.load(_f).get("solution_concentrations", {})
+    except Exception:
+        _sol_conc_rules = {
+            "7647-01-0": "36-38%", "7664-93-9": "95-98%", "7697-37-2": "65-70%",
+            "7664-38-2": "≥85%", "7681-52-9": "10-15%", "7722-84-1": "30-50%", "64-19-7": "≥99.0%",
+        }
+    concentration = _sol_conc_rules.get(cas, "≥99.0%")
     gen.set_components([{
-        "name": kb_data.get("chemical_name_cn", product_name),
-        "cas": kb_data.get("cas_number", ""),
-        "concentration": "≥99.0%",
+        "name": name_cn,
+        "cas": cas,
+        "concentration": concentration,
         "ghs_classifications": ghs_list,
     }])
 
@@ -2223,7 +2677,8 @@ def generate_mixture_sds(components_data: List[dict],
                           mixture_classifications: List[dict],
                           product_name: str = "",
                           use_llm: bool = False, version: str = "1.0",
-                          revision_date: str = "", revision_log: list = None) -> tuple:
+                          revision_date: str = "", revision_log: list = None,
+                          calc_result=None) -> tuple:
     """
     生成混合物SDS
 
@@ -2282,25 +2737,39 @@ def generate_mixture_sds(components_data: List[dict],
     s1 = gen.document.sections[1]
     for key in ["cas_number", "molecular_formula", "molecular_weight",
                 "ec_number", "iupac_name"]:
-        s1.fields[key] = FieldValue(value="不适用", source="template")
+        s1.fields[key] = FieldValue(value="不适用（混合物，见第三部分成分表）", source="template")
     s1.fields["un_number"] = FieldValue(value="不适用", source="template")
-    if not s1.fields.get("product_name_en"):
-        s1.fields["product_name_en"] = FieldValue(value="不适用", source="template")
+    # NEW-109: 混合物英文名称使用产品名 + " mixture"，而非第一个组分名
     if product_name:
+        s1.fields["product_name_en"] = FieldValue(value=f"{product_name} mixture", source="template")
         s1.fields["product_name_cn"] = FieldValue(value=product_name, source="input")
     else:
+        s1.fields["product_name_en"] = FieldValue(value="Mixture", source="template")
         s1.fields.pop("product_name_cn", None)
 
-    # 混合物模式：S9理化特性从组分数据聚合推导
+    # 混合物模式：S9理化特性从组分数据聚合推导（DEF-110: 改进聚合策略）
     s9 = gen.document.sections[9]
     s9.fields.clear()
+
+    # 预处理：按浓度排序，识别主组分
+    comp_with_conc = []
+    for comp in components_data:
+        conc_str = str(comp.get("concentration", "0")).replace("%", "")
+        try:
+            conc = float(conc_str)
+        except (ValueError, TypeError):
+            conc = 0
+        comp_with_conc.append((comp, conc))
+    comp_with_conc.sort(key=lambda x: x[1], reverse=True)
+    main_comp = comp_with_conc[0][0] if comp_with_conc else {}
+
     # 聚合理化特性
     flash_points = []
     boiling_points = []
     densities = []
     appearances = []
     solubilities = []
-    for comp in components_data:
+    for comp, conc in comp_with_conc:
         try:
             fp = str(comp.get("flash_point", ""))
             fp_match = re.search(r'-?[\d.]+', fp)
@@ -2312,7 +2781,10 @@ def generate_mixture_sds(components_data: List[dict],
             bp = str(comp.get("boiling_point", ""))
             bp_match = re.search(r'-?[\d.]+', bp)
             if bp_match:
-                boiling_points.append(float(bp_match.group()))
+                bp_val = float(bp_match.group())
+                # 仅取挥发性组分（沸点<300°C），排除NaOH等不挥发溶质
+                if bp_val < 300:
+                    boiling_points.append(bp_val)
         except:
             pass
         try:
@@ -2339,29 +2811,56 @@ def generate_mixture_sds(components_data: List[dict],
         if bp_min == bp_max:
             s9.fields["boiling_point"] = FieldValue(value=f"{bp_min:.0f}", source="aggregation")
         else:
-            s9.fields["boiling_point"] = FieldValue(value=f"{bp_min:.0f}~{bp_max:.0f}", source="aggregation")
+            s9.fields["boiling_point"] = FieldValue(value=f"{bp_min:.0f}~{bp_max:.0f}（挥发性组分范围）", source="aggregation")
     if densities:
         # 密度取加权平均（按浓度）
-        total_conc = sum(float(str(c.get("concentration", "0")).replace("%", "")) for c in components_data)
+        total_conc = sum(conc for _, conc in comp_with_conc)
         if total_conc > 0:
-            avg_density = sum(d * float(str(components_data[i].get("concentration", "0")).replace("%", "")) / total_conc
+            avg_density = sum(d * comp_with_conc[i][1] / total_conc
                              for i, d in enumerate(densities))
-            s9.fields["density"] = FieldValue(value=f"{avg_density:.2f}（加权平均）", source="aggregation")
+            s9.fields["density"] = FieldValue(value=f"{avg_density:.2f}（加权平均估算值）", source="aggregation")
     if appearances:
-        unique_apps = list(dict.fromkeys(appearances))[:3]  # 去重，最多3个
-        s9.fields["appearance"] = FieldValue(value="；".join(unique_apps), source="aggregation")
+        # NEW-108: 判断液体组分是否主导（>50%浓度）
+        _solid_keywords = ["固体", "粉末", "片状", "颗粒", "结晶"]
+        total_conc_all = sum(conc for _, conc in comp_with_conc)
+        liquid_conc = 0.0
+        for comp, conc in comp_with_conc:
+            app_check = str(comp.get("appearance", ""))
+            is_solid = any(kw in app_check for kw in _solid_keywords)
+            if not is_solid:
+                liquid_conc += conc
+        liquid_dominant = total_conc_all > 0 and (liquid_conc / total_conc_all) > 0.5
+
+        # DEF-110: 取主组分外观而非拼接所有（避免"白色固体；无色液体"矛盾）
+        main_app = str(main_comp.get("appearance", ""))
+        if main_app and "无可用" not in main_app:
+            # NEW-108: 若液体主导且主组分外观为固体，则过滤为液体描述
+            if liquid_dominant and any(kw in main_app for kw in _solid_keywords):
+                main_app = "液体（根据组分推断）"
+            s9.fields["appearance"] = FieldValue(value=main_app, source="aggregation")
+        else:
+            # fallback: 去重后最多2个，过滤固体描述（当液体主导时）
+            filtered_apps = list(dict.fromkeys(appearances))[:2]
+            if liquid_dominant:
+                filtered_apps = [a for a in filtered_apps if not any(kw in a for kw in _solid_keywords)]
+            if filtered_apps:
+                s9.fields["appearance"] = FieldValue(value="；".join(filtered_apps), source="aggregation")
+            else:
+                s9.fields["appearance"] = FieldValue(value="液体（根据组分推断）", source="inference")
     else:
-        # 推断外观：含有易燃液体组分 → 液体
+        # 推断外观：根据主组分浓度和物态
         s9.fields["appearance"] = FieldValue(value="液体（根据组分推断）", source="inference")
     s9.fields["odor"] = FieldValue(value="有特殊气味（含有机溶剂组分）", source="inference")
-    # 熔点聚合
+    # 熔点聚合（DEF-110: 仅取挥发性组分的熔点范围）
     melting_points = []
-    for comp in components_data:
+    for comp, conc in comp_with_conc:
         try:
             mp = str(comp.get("melting_point", ""))
             mp_match = re.search(r'-?[\d.]+', mp)
             if mp_match:
-                melting_points.append(float(mp_match.group()))
+                mp_val = float(mp_match.group())
+                if mp_val < 100:  # 排除溶质的高熔点
+                    melting_points.append(mp_val)
         except:
             pass
     if melting_points:
@@ -2371,15 +2870,40 @@ def generate_mixture_sds(components_data: List[dict],
             s9.fields["melting_point"] = FieldValue(value=f"{mp_min:.0f}", source="aggregation")
         else:
             s9.fields["melting_point"] = FieldValue(value=f"{mp_min:.0f}~{mp_max:.0f}", source="aggregation")
-    # 溶解性聚合（从KB的solubility字段）
+    # 溶解性聚合（DEF-006: 语义融合替代直接拼接）
     sol_values = []
     for comp in components_data:
         sol = str(comp.get("solubility", comp.get("solubility_details", "")))
         if sol and "无可用" not in sol:
             sol_values.append(sol)
     if sol_values:
-        unique_sol = list(dict.fromkeys(sol_values))[:4]
-        s9.fields["solubility"] = FieldValue(value="；".join(unique_sol), source="aggregation")
+        # 分类归纳溶解性
+        water_soluble = []    # 与水混溶
+        partial_soluble = []  # 微溶于水
+        organic_soluble = []  # 溶于有机溶剂
+        for sol in sol_values:
+            if "与水混溶" in sol or "与水完全互溶" in sol or "易溶于水" in sol:
+                water_soluble.append(sol)
+            elif "微溶于水" in sol or "难溶于水" in sol or "不溶于水" in sol:
+                partial_soluble.append(sol)
+            if "有机溶剂" in sol:
+                organic_soluble.append(sol)
+        # 生成融合描述
+        sol_parts = []
+        if water_soluble and partial_soluble:
+            sol_parts.append("部分组分与水混溶，部分组分微溶或难溶于水")
+        elif water_soluble:
+            sol_parts.append("各组分均与水混溶")
+        elif partial_soluble:
+            sol_parts.append("各组分微溶或难溶于水")
+        if organic_soluble:
+            sol_parts.append("各组分均易溶于常见有机溶剂（乙醇、乙醚、丙酮等）")
+        if sol_parts:
+            s9.fields["solubility"] = FieldValue(value="；".join(sol_parts), source="aggregation")
+        else:
+            # fallback: 去重后拼接（限制4条）
+            unique_sol = list(dict.fromkeys(sol_values))[:4]
+            s9.fields["solubility"] = FieldValue(value="；".join(unique_sol), source="aggregation")
     else:
         # 推断：含有机溶剂组分
         s9.fields["solubility"] = FieldValue(value="溶解性因组分而异，参见第三部分各组分数据", source="inference")
@@ -2464,6 +2988,16 @@ def generate_mixture_sds(components_data: List[dict],
                     value=f"ATE = {ate_val:.1f} mg/L（混合物计算值）",
                     source="classification")
 
+    # 即使ATE不分类（>5000），也用ATE计算值替换纯物质LD50，避免误导
+    if calc_result and getattr(calc_result, 'ate_oral', None):
+        s11.fields["ld50_oral"] = FieldValue(
+            value=f"ATE ≈ {calc_result.ate_oral:.0f} mg/kg（混合物估算值）",
+            source="classification")
+    if calc_result and getattr(calc_result, 'ate_dermal', None):
+        s11.fields["ld50_dermal"] = FieldValue(
+            value=f"ATE ≈ {calc_result.ate_dermal:.0f} mg/kg（混合物估算值）",
+            source="classification")
+
     # 混合物S11毒理：从组分GHS分类反填（皮肤/眼/致癌/生殖/STOT等）
     # 扫描所有组分的ghs_classifications，聚合各危害类别
     all_comp_ghs = []
@@ -2509,9 +3043,19 @@ def generate_mixture_sds(components_data: List[dict],
     if stot_re:
         s11.fields["stot_repeated_exposure"] = FieldValue(
             value=", ".join(str(c) for c in set(stot_re)), source="classification")
-    # 吸入危害
+    # 吸入危害（DEF-003: 根据组分类型判断描述）
     if any(kw in all_ghs_text for kw in ["吸入危害", "吸入危险"]):
-        s11.fields["aspiration_hazard"] = FieldValue(value="含低粘度有机液体组分，存在吸入危害", source="classification")
+        # 检查是否含有机液体组分
+        has_organic_comp = False
+        for c_data in components_data:
+            formula = str(c_data.get("molecular_formula", ""))
+            if "C" in formula and "H" in formula:
+                has_organic_comp = True
+                break
+        if has_organic_comp:
+            s11.fields["aspiration_hazard"] = FieldValue(value="含低粘度有机液体组分，存在吸入危害", source="classification")
+        else:
+            s11.fields["aspiration_hazard"] = FieldValue(value="根据分类，存在吸入危害", source="classification")
     # 致敏
     if "致敏" in all_ghs_text:
         s11.fields.setdefault("skin_sensitization", FieldValue(value="根据组分分类推断", source="classification"))
@@ -2556,20 +3100,45 @@ def generate_mixture_sds(components_data: List[dict],
     if eco_soil:
         s12.fields["mobility_in_soil"] = FieldValue(value="；".join(eco_soil[:6]), source="aggregation")
 
-    # 混合物S14运输：推导运输类别、UN编号、包装类别和海洋污染物
+    # 混合物S14运输：推导运输类别、UN编号、包装类别和海洋污染物（DEF-111: 多重危险）
     s14 = gen.document.sections[14]
-    # 推导运输类别
     ghs_text_for_transport = " ".join(c.get("hazard", "") for c in mixture_classifications)
-    if "易燃液体" in ghs_text_for_transport:
-        s14.fields["transport_class"] = FieldValue(value="3", source="classification")
-        s14.fields["un_number"] = FieldValue(value="UN 1993", source="classification")
-        s14.fields["proper_shipping_name"] = FieldValue(value="易燃液体，未另作规定的", source="classification")
-    elif "易燃固体" in ghs_text_for_transport:
-        s14.fields["transport_class"] = FieldValue(value="4.1", source="classification")
-    elif "急性毒性" in ghs_text_for_transport:
-        s14.fields["transport_class"] = FieldValue(value="6.1", source="classification")
-    elif "腐蚀" in ghs_text_for_transport:
-        s14.fields["transport_class"] = FieldValue(value="8", source="classification")
+    # 收集所有匹配的运输类别
+    transport_mapping = gen.TYPE_RULES.get("transport_class_mapping", [])
+    matched_transport_classes = []
+    for rule in transport_mapping:
+        keywords = rule.get("ghs_keywords", [])
+        if any(kw in ghs_text_for_transport for kw in keywords):
+            cls = rule.get("class", "")
+            if cls and cls not in matched_transport_classes:
+                matched_transport_classes.append(cls)
+    # 检查多重危险组合
+    multi_hazard_rules = gen.TYPE_RULES.get("transport_multi_hazard", [])
+    multi_matched = None
+    for rule in multi_hazard_rules:
+        if set(rule["classes"]).issubset(set(matched_transport_classes)):
+            multi_matched = rule
+            break
+    if multi_matched:
+        s14.fields["transport_class"] = FieldValue(
+            value=f"{multi_matched['primary']}（主要），{multi_matched['secondary']}（次要）",
+            source="classification")
+        s14.fields["un_number"] = FieldValue(
+            value=f"UN {multi_matched['un_number']}", source="classification")
+        s14.fields["proper_shipping_name"] = FieldValue(
+            value=multi_matched["shipping_name"], source="classification")
+    elif matched_transport_classes:
+        primary_cls = matched_transport_classes[0]
+        s14.fields["transport_class"] = FieldValue(value=primary_cls, source="classification")
+        for rule in transport_mapping:
+            if rule.get("class") == primary_cls:
+                s14.fields["proper_shipping_name"] = FieldValue(
+                    value=rule.get("shipping_name", ""), source="classification")
+                break
+        un_defaults = {"3": "UN 1993", "4.1": "UN 1325", "6.1": "UN 2810",
+                       "8": "UN 1760", "5.1": "UN 1479", "9": "UN 3082"}
+        if primary_cls in un_defaults:
+            s14.fields["un_number"] = FieldValue(value=un_defaults[primary_cls], source="classification")
     # 从分类推导包装类别
     has_cat1_or_2 = any("Cat 1" in c.get("hazard", "") or "Cat 2" in c.get("hazard", "") for c in mixture_classifications)
     if "packing_group" not in s14.fields or "待确认" in str(s14.fields.get("packing_group", "")):
