@@ -78,7 +78,7 @@ class PubChemFetcher:
                 if cids:
                     return cids[0]
         except (requests.RequestException, ValueError) as e:
-            print(f"  [DEBUG] PubChem CAS查询失败({cas_or_name}): {type(e).__name__}")
+            print(f"  [INFO] PubChem CAS查询失败({cas_or_name}): {type(e).__name__}")
 
         # CAS查询失败，尝试英文名查询
         url = f"{PUBCHEM_BASE}/compound/name/{cas_or_name}/cids/JSON"
@@ -89,7 +89,7 @@ class PubChemFetcher:
                 if cids:
                     return cids[0]
         except (requests.RequestException, ValueError) as e:
-            print(f"  [DEBUG] PubChem名称查询失败({cas_or_name}): {type(e).__name__}")
+            print(f"  [INFO] PubChem名称查询失败({cas_or_name}): {type(e).__name__}")
 
         # 英文名也失败，尝试通过synonym搜索（支持中文名）
         cid = self._search_synonym(cas_or_name)
@@ -366,7 +366,7 @@ def call_llm(prompt: str, system_prompt: str = "", temperature: float = 0.2) -> 
             if block.type == "text":
                 return block.text
         return None
-    except Exception as e:
+    except (RuntimeError, ValueError, OSError) as e:
         print(f"  [WARN] LLM调用失败: {e}")
         return None
 
@@ -580,7 +580,7 @@ class KnowledgeBaseManager:
                     "formula_inference": data.get("formula_inference", []),
                     "default_inference": data.get("default_inference", {}),
                 }
-            except Exception:
+            except (OSError, ValueError):
                 KnowledgeBaseManager._inference_rules = {
                     "formula_inference": [],
                     "default_inference": {"chemical_family": "有机化合物", "un_number": "1993"},

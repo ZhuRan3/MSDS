@@ -133,7 +133,7 @@ class SDSPipeline:
                     print(f"  [WARN] 未配置LLM API密钥(ANTHROPIC_API_KEY)，LLM增强功能已禁用")
                     print(f"  [WARN] 将使用纯规则引擎生成，部分数据可能为推断值")
                     use_llm = False
-            except Exception:
+            except (KeyError, AttributeError):
                 pass
         # 将冲突信息注入data_dict，供生成器使用
         if pool.conflicts:
@@ -341,7 +341,7 @@ class SDSPipeline:
                 # 重新加载retriever的KB
                 self.retriever.kb = self.retriever._load_kb()
                 return mgr.data.get(actual_query)
-        except Exception as e:
+        except (ImportError, OSError, ValueError) as e:
             print(f"  [WARN] kb_manager获取失败: {e}")
         return None
 
@@ -356,7 +356,7 @@ class SDSPipeline:
                 with open(map_path, "r", encoding="utf-8") as f:
                     data = json.load(f)
                 SDSPipeline._cn_en_map = data.get("cn_to_en", {})
-            except Exception:
+            except (OSError, json.JSONDecodeError):
                 SDSPipeline._cn_en_map = {}
         return SDSPipeline._cn_en_map
 
@@ -379,7 +379,7 @@ class SDSPipeline:
             result = llm_infer(prompt, "")
             if result and len(result.strip()) < 50:
                 return result.strip()
-        except:
+        except (ImportError, RuntimeError, ValueError):
             pass
         return None
 
@@ -465,7 +465,7 @@ class SDSPipeline:
                 pdf_path = str(p.with_suffix('.pdf'))
                 generate_pdf(content, pdf_path, title=p.stem)
                 print(f"  已保存PDF: {pdf_path}")
-            except Exception as e:
+            except (ImportError, OSError, RuntimeError) as e:
                 print(f"  [WARN] PDF生成失败: {e}")
 
 

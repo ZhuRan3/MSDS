@@ -480,20 +480,27 @@ class SDSGenerator:
         # 从GHS分类推导应避免条件
         ghs_list = data.get("ghs_classifications", [])
         ghs_text = " ".join(str(g) for g in ghs_list) if isinstance(ghs_list, list) else str(ghs_list)
+        # 检查是否有Cat 1腐蚀（需在每条分类中单独判断，避免跨分类误匹配）
+        _has_cat1_corrosion_s10 = any(
+            ("皮肤腐蚀" in str(g) and ("类别1" in str(g) or "Cat 1" in str(g))) or "金属腐蚀" in str(g)
+            for g in (ghs_list if isinstance(ghs_list, list) else [ghs_list])
+        )
         if "易燃" in ghs_text:
             s10.fields["conditions_to_avoid"] = FieldValue(value="明火、高热、静电、火花。", source="kb")
         elif "氧化" in ghs_text:
             s10.fields["conditions_to_avoid"] = FieldValue(value="热源、污染、可燃物、还原剂、金属粉末。", source="kb")
-        elif self._has_classification("腐蚀", require_cat1=True):
-            # 酸/碱水溶液不应建议"避免潮湿/水"
+        elif _has_cat1_corrosion_s10:
+            # 浓酸/浓碱遇水剧烈放热，应建议避免与水接触
             _acid_hints_s10ca = ["酸", "HCl", "H2SO4", "HNO3", "H3PO4", "HF"]
             _alkali_hints_s10ca = ["碱", "NaOH", "KOH", "Ca(OH)2", "氢氧化", "次氯酸钠", "NaClO"]
             name_str = str(data.get("chemical_name_cn", ""))
             formula_str = str(data.get("molecular_formula", ""))
             _is_acid_s10ca = any(h in name_str or h in formula_str for h in _acid_hints_s10ca)
             _is_alkali_s10ca = any(h in name_str or h in formula_str for h in _alkali_hints_s10ca)
-            if _is_acid_s10ca or _is_alkali_s10ca:
-                s10.fields["conditions_to_avoid"] = FieldValue(value="高温、明火。", source="kb")
+            if _is_acid_s10ca:
+                s10.fields["conditions_to_avoid"] = FieldValue(value="高温、明火。避免与水接触（遇水剧烈放热）。", source="kb")
+            elif _is_alkali_s10ca:
+                s10.fields["conditions_to_avoid"] = FieldValue(value="高温、明火。避免与水接触（遇水放热）。", source="kb")
             else:
                 # 腐蚀品但非酸非碱（如有机腐蚀品），不盲目建议避水
                 s10.fields["conditions_to_avoid"] = FieldValue(value="高温、明火、不相容物质。", source="kb")
@@ -1044,7 +1051,7 @@ class SDSGenerator:
                             parts.append(f"**{label}**: {result[key]}")
                     if parts:
                         return "# 第七部分：操作处置与储存\n\n" + "\n\n".join(parts) + "\n\n---"
-        except Exception:
+        except (RuntimeError, ValueError, OSError):
             pass  # LLM增强失败，静默回退到模板
         return template_content
 
@@ -1152,7 +1159,7 @@ class SDSGenerator:
             health_parts = []
             if "急性毒性" in ghs_text:
                 health_parts.append("具急性毒性")
-            if "皮肤腐蚀" in ghs_text and ("类别1" in ghs_text or "Cat 1" in ghs_text):
+            if self._has_classification("腐蚀", require_cat1=True):
                 health_parts.append("引起皮肤灼伤")
             elif "皮肤刺激" in ghs_text or "皮肤腐蚀/刺激" in ghs_text:
                 health_parts.append("可引起皮肤刺激")
@@ -1244,8 +1251,10 @@ class SDSGenerator:
         health = []
         if "急性毒性" in ghs_text:
             health.append("具急性毒性")
-        if "皮肤腐蚀" in ghs_text and ("类别1" in ghs_text or "Cat 1" in ghs_text):
+        if self._has_classification("腐蚀", require_cat1=True):
             health.append("引起皮肤灼伤")
+        elif "皮肤刺激" in ghs_text or "皮肤腐蚀/刺激" in ghs_text:
+            health.append("可引起皮肤刺激")
         if "金属腐蚀" in ghs_text:
             health.append("具腐蚀性")
         if "眼损伤" in ghs_text:
@@ -1680,6 +1689,13 @@ class SDSGenerator:
             cleanup = "收集泄漏物。回收利用。避免产生粉尘。"
         else:
             cleanup = "用惰性吸收材料（砂土、蛭石等）吸收泄漏物。收集于适当的废弃物容器中。"
+        # 腐蚀品中和处理
+        if is_corrosive and not is_gas and not is_solid_metal:
+            chem_types_s6 = self._get_chemical_types()
+            if "corrosive_acid" in chem_types_s6:
+                cleanup += "用石灰石、苏打灰或石灰中和酸液后再行清理。"
+            elif "corrosive_alkali" in chem_types_s6:
+                cleanup += "用弱酸（如稀醋酸）中和碱液后再行清理。"
         if is_flammable and not is_gas:
             cleanup += "通风。"
 
@@ -1882,13 +1898,14 @@ class SDSGenerator:
                 elif "corrosive_alkali" in chem_types_s9:
                     ph_val = ">13 (强碱性) [待确认]"
                 else:
-                    # 有机溶剂：pH不适用（非水溶性物质）
+                    # 水溶性有机物（乙醇、丙酮等）pH约7；非水溶性有机溶剂pH不适用
+                    water_miscible = ["C2H6O", "C3H6O", "CH4O", "CH2O2", "C2H4O2",
+                                      "C2H6O2", "C3H8O2", "C3H8O3"]
                     organic_types = {"flammable_liquid", "organic_solvent"}
-                    neutral_organics = ["C2H6O", "C3H6O", "C6H12O", "C4H10O"]
-                    if organic_types & set(chem_types_s9):
-                        ph_val = "不适用（有机溶剂，非水溶性） [待确认]"
-                    elif formula_s9 in neutral_organics:
+                    if formula_s9 in water_miscible:
                         ph_val = "约7 (中性)"
+                    elif organic_types & set(chem_types_s9):
+                        ph_val = "不适用（有机溶剂，非水溶性） [待确认]"
                     else:
                         ph_val = "需实测 [待确认]"
         if ph_val and ph_val != '无可用数据 [待确认]':
@@ -2524,15 +2541,16 @@ class SDSGenerator:
                     ghs_text = " ".join(str(g) for g in ghs_raw)
                 else:
                     ghs_text = str(ghs_raw) if ghs_raw else ""
-                # 碱类 → HW35
+                # 碱类 → HW35（仅Cat 1腐蚀或金属腐蚀）
                 cn_name = str(comp.get("chemical_name_cn", ""))
-                if ("皮肤腐蚀" in ghs_text and ("类别1" in ghs_text or "Cat 1" in ghs_text)) or "金属腐蚀" in ghs_text:
+                _comp_has_cat1_corrosion = any("皮肤腐蚀" in str(g) and ("类别1" in str(g) or "Cat 1" in str(g)) for g in (ghs_raw if isinstance(ghs_raw, list) else [ghs_raw]))
+                if _comp_has_cat1_corrosion or "金属腐蚀" in ghs_text:
                     if any(h in cn_name for h in ["氢氧化", "氢氧化钠", "氢氧化钾", "氢氧化钙"]):
                         if "HW35（废碱）" not in waste_codes:
                             waste_codes.append("HW35（废碱）")
-                # 酸类 → HW34
+                # 酸类 → HW34（仅Cat 1腐蚀或金属腐蚀）
                 formula = str(comp.get("molecular_formula", ""))
-                if any(kw in ghs_text for kw in ["皮肤腐蚀", "金属腐蚀"]) and \
+                if (_comp_has_cat1_corrosion or "金属腐蚀" in ghs_text) and \
                    any(h in formula for h in ["HCl", "H2SO4", "HNO3", "HF"]):
                     if "HW34（废酸）" not in waste_codes:
                         waste_codes.append("HW34（废酸）")
@@ -2712,7 +2730,7 @@ class SDSGenerator:
         if "易燃" in ghs_text:
             extra_regs.append("《危险化学品安全管理条例》（国务院令第591号）")
             extra_regs.append("《易制毒化学品管理条例》（针对特定有机溶剂）")
-        if "腐蚀" in ghs_text:
+        if self._has_classification("腐蚀", require_cat1=True):
             extra_regs.append("《危险化学品安全管理条例》（国务院令第591号）")
         if "致癌" in ghs_text or "致突变" in ghs_text:
             extra_regs.append("《职业病防治法》— 致癌物职业接触管理")
@@ -2756,7 +2774,7 @@ class SDSGenerator:
         ]
         if "易燃" in ghs_text:
             intl_regs.append("GB 50016《建筑设计防火规范》")
-        if "腐蚀" in ghs_text:
+        if self._has_classification("腐蚀", require_cat1=True):
             intl_regs.append("GB 30000.2-2013《化学品分类和标签规范 第2部分：爆炸物》等系列标准")
 
         all_cn = list(cn_regs) + [r for r in extra_regs if r not in cn_regs]
@@ -2883,7 +2901,7 @@ def generate_pure_sds(kb_data: dict, product_name: str = "",
         if _ci_path.exists():
             with open(_ci_path, "r", encoding="utf-8") as _f:
                 company_info = json.load(_f)
-    except Exception:
+    except (OSError, json.JSONDecodeError):
         pass
     _supplier = company_info.get("company_name", "")
     if company_info.get("company_address"):
@@ -2927,7 +2945,7 @@ def generate_pure_sds(kb_data: dict, product_name: str = "",
         _rules_path = os.path.join(os.path.dirname(__file__), '..', 'db', 'chemical_type_rules.json')
         with open(_rules_path, 'r', encoding='utf-8') as _f:
             _sol_conc_rules = _json.load(_f).get("solution_concentrations", {})
-    except Exception:
+    except (OSError, ValueError):
         _sol_conc_rules = {
             "7647-01-0": "36-38%", "7664-93-9": "95-98%", "7697-37-2": "65-70%",
             "7664-38-2": "≥85%", "7681-52-9": "10-15%", "7722-84-1": "30-50%", "64-19-7": "≥99.0%",
@@ -2976,7 +2994,7 @@ def generate_mixture_sds(components_data: List[dict],
         if _ci_path.exists():
             with open(_ci_path, "r", encoding="utf-8") as _f:
                 company_info = json.load(_f)
-    except Exception:
+    except (OSError, json.JSONDecodeError):
         pass
     _supplier = company_info.get("company_name", "")
     if company_info.get("company_address"):
@@ -3076,7 +3094,7 @@ def generate_mixture_sds(components_data: List[dict],
             fp_match = re.search(r'-?[\d.]+', fp)
             if fp_match:
                 flash_points.append(float(fp_match.group()))
-        except:
+        except (ValueError, TypeError, AttributeError):
             pass
         try:
             bp = str(comp.get("boiling_point", ""))
@@ -3086,14 +3104,14 @@ def generate_mixture_sds(components_data: List[dict],
                 # 仅取挥发性组分（沸点<300°C），排除NaOH等不挥发溶质
                 if bp_val < 300:
                     boiling_points.append(bp_val)
-        except:
+        except (ValueError, TypeError, AttributeError):
             pass
         try:
             d = str(comp.get("density", ""))
             d_match = re.search(r'[\d.]+', d)
             if d_match:
                 densities.append(float(d_match.group()))
-        except:
+        except (ValueError, TypeError, AttributeError):
             pass
         app = str(comp.get("appearance", ""))
         if app and "无可用" not in app:
@@ -3182,7 +3200,7 @@ def generate_mixture_sds(components_data: List[dict],
                 mp_val = float(mp_match.group())
                 if mp_val < 100:  # 排除溶质的高熔点
                     melting_points.append(mp_val)
-        except:
+        except (ValueError, TypeError, AttributeError):
             pass
     if melting_points:
         mp_min = min(melting_points)
