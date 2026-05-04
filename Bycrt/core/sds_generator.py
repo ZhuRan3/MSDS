@@ -2910,11 +2910,18 @@ def generate_pure_sds(kb_data: dict, product_name: str = "",
         _supplier += f"，电话：{company_info['company_phone']}"
     if company_info.get("email"):
         _supplier += f"，邮箱：{company_info['email']}"
+    # 占位符检测：企业信息未配置时加 [待确认]
+    _has_placeholder = any(
+        v.startswith("[") and v.endswith("]")
+        for v in [_supplier, company_info.get("emergency_phone", "")]
+    )
+    if _has_placeholder:
+        _supplier += " [待确认]"
 
     gen.set_input_info(product_name=product_name,
                        recommended_use=company_info.get("recommended_use", ""),
                        supplier=_supplier,
-                       emergency_phone=company_info.get("emergency_phone", ""),
+                       emergency_phone=company_info.get("emergency_phone", "") + (" [待确认]" if _has_placeholder else ""),
                        version=version, revision_date=revision_date,
                        revision_log=revision_log)
 
@@ -3003,11 +3010,18 @@ def generate_mixture_sds(components_data: List[dict],
         _supplier += f"，电话：{company_info['company_phone']}"
     if company_info.get("email"):
         _supplier += f"，邮箱：{company_info['email']}"
+    # 占位符检测：企业信息未配置时加 [待确认]
+    _has_placeholder = any(
+        v.startswith("[") and v.endswith("]")
+        for v in [_supplier, company_info.get("emergency_phone", "")]
+    )
+    if _has_placeholder:
+        _supplier += " [待确认]"
 
     gen.set_input_info(product_name=product_name,
                        recommended_use=company_info.get("recommended_use", ""),
                        supplier=_supplier,
-                       emergency_phone=company_info.get("emergency_phone", ""),
+                       emergency_phone=company_info.get("emergency_phone", "") + (" [待确认]" if _has_placeholder else ""),
                        version=version, revision_date=revision_date,
                        revision_log=revision_log)
 
