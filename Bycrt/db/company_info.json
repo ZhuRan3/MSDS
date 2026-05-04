@@ -1,0 +1,13 @@
+{
+  "_meta": {
+    "description": "企业信息配置 — 生成MSDS时自动填充第1部分供应商信息",
+    "usage": "修改下方字段后，新生成的MSDS将自动使用此配置"
+  },
+  "company_name": "[企业名称]",
+  "company_address": "[企业地址]",
+  "company_phone": "[企业电话]",
+  "emergency_phone": "[24小时应急电话]",
+  "email": "[企业邮箱]",
+  "recommended_use": "工业用途",
+  "restrictions_on_use": "请参阅安全数据表中的危险分类信息，非专业人员不得擅自操作。"
+}

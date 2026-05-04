@@ -124,6 +124,17 @@ class SDSPipeline:
             print(f"  [WARN] {len(low_conf)} 个低置信度字段: {', '.join(low_conf[:5])}")
 
         # L4: 分类（纯净物直接从GHS分类构建）
+        # 检查LLM可用性
+        if use_llm:
+            try:
+                import os
+                has_key = bool(os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("HUANTONG_LLM_API_KEY"))
+                if not has_key:
+                    print(f"  [WARN] 未配置LLM API密钥(ANTHROPIC_API_KEY)，LLM增强功能已禁用")
+                    print(f"  [WARN] 将使用纯规则引擎生成，部分数据可能为推断值")
+                    use_llm = False
+            except Exception:
+                pass
         # 将冲突信息注入data_dict，供生成器使用
         if pool.conflicts:
             data_dict["_data_conflicts"] = [

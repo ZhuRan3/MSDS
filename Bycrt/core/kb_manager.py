@@ -77,8 +77,8 @@ class PubChemFetcher:
                 cids = resp.json().get("IdentifierList", {}).get("CID", [])
                 if cids:
                     return cids[0]
-        except:
-            pass
+        except (requests.RequestException, ValueError) as e:
+            print(f"  [DEBUG] PubChem CAS查询失败({cas_or_name}): {type(e).__name__}")
 
         # CAS查询失败，尝试英文名查询
         url = f"{PUBCHEM_BASE}/compound/name/{cas_or_name}/cids/JSON"
@@ -88,8 +88,8 @@ class PubChemFetcher:
                 cids = resp.json().get("IdentifierList", {}).get("CID", [])
                 if cids:
                     return cids[0]
-        except:
-            pass
+        except (requests.RequestException, ValueError) as e:
+            print(f"  [DEBUG] PubChem名称查询失败({cas_or_name}): {type(e).__name__}")
 
         # 英文名也失败，尝试通过synonym搜索（支持中文名）
         cid = self._search_synonym(cas_or_name)
@@ -109,7 +109,7 @@ class PubChemFetcher:
                 cids = resp.json().get("IdentifierList", {}).get("CID", [])
                 if cids:
                     return cids[0]
-        except:
+        except (requests.RequestException, ValueError):
             pass
 
         # 最后尝试：从PubChem REST API搜索
@@ -121,7 +121,7 @@ class PubChemFetcher:
                 compounds = data.get("PC_Compounds", [])
                 if compounds:
                     return compounds[0].get("id", {}).get("id", {}).get("cid")
-        except:
+        except (requests.RequestException, ValueError):
             pass
         return None
 
@@ -153,7 +153,7 @@ class PubChemFetcher:
             if resp.status_code == 200:
                 properties = resp.json().get("PropertyTable", {}).get("Properties", [{}])[0]
                 return properties
-        except:
+        except (requests.RequestException, ValueError):
             pass
 
         # 尝试JSONP的方式
@@ -162,7 +162,7 @@ class PubChemFetcher:
             resp = self.session.get(jsonp_url, timeout=30)
             if resp.status_code == 200:
                 return resp.json().get("PropertyTable", {}).get("Properties", [{}])[0] or {}
-        except:
+        except (requests.RequestException, ValueError):
             pass
         return {}
 
@@ -173,7 +173,7 @@ class PubChemFetcher:
             resp = self.session.get(url, timeout=30)
             if resp.status_code == 200:
                 return resp.json()
-        except:
+        except (requests.RequestException, ValueError):
             pass
         return {}
 
@@ -184,7 +184,7 @@ class PubChemFetcher:
             resp = self.session.get(url, timeout=30)
             if resp.status_code == 200:
                 return resp.json()
-        except:
+        except (requests.RequestException, ValueError):
             pass
         return {}
 
@@ -201,7 +201,7 @@ class PubChemFetcher:
             resp = self.session.get(url, params=params, timeout=30)
             if resp.status_code == 200:
                 return resp.json()
-        except:
+        except (requests.RequestException, ValueError):
             pass
         return {}
 
@@ -421,7 +421,7 @@ CAS号: {cas}
             if "```json" in result:
                 result = result.split("```json")[1].split("```")[0]
             return json.loads(result.strip())
-        except:
+        except (requests.RequestException, ValueError):
             pass
     return {}
 

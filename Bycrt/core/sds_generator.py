@@ -2875,7 +2875,28 @@ def generate_pure_sds(kb_data: dict, product_name: str = "",
     """
     gen = SDSGenerator(use_llm=use_llm)
     gen.set_chemical_data(kb_data)
+
+    # 加载企业信息配置
+    company_info = {}
+    try:
+        _ci_path = DB_DIR / "company_info.json"
+        if _ci_path.exists():
+            with open(_ci_path, "r", encoding="utf-8") as _f:
+                company_info = json.load(_f)
+    except Exception:
+        pass
+    _supplier = company_info.get("company_name", "")
+    if company_info.get("company_address"):
+        _supplier += f"，{company_info['company_address']}"
+    if company_info.get("company_phone"):
+        _supplier += f"，电话：{company_info['company_phone']}"
+    if company_info.get("email"):
+        _supplier += f"，邮箱：{company_info['email']}"
+
     gen.set_input_info(product_name=product_name,
+                       recommended_use=company_info.get("recommended_use", ""),
+                       supplier=_supplier,
+                       emergency_phone=company_info.get("emergency_phone", ""),
                        version=version, revision_date=revision_date,
                        revision_log=revision_log)
 
@@ -2947,7 +2968,28 @@ def generate_mixture_sds(components_data: List[dict],
         (markdown_content, review_flags)
     """
     gen = SDSGenerator(use_llm=use_llm)
+
+    # 加载企业信息配置
+    company_info = {}
+    try:
+        _ci_path = DB_DIR / "company_info.json"
+        if _ci_path.exists():
+            with open(_ci_path, "r", encoding="utf-8") as _f:
+                company_info = json.load(_f)
+    except Exception:
+        pass
+    _supplier = company_info.get("company_name", "")
+    if company_info.get("company_address"):
+        _supplier += f"，{company_info['company_address']}"
+    if company_info.get("company_phone"):
+        _supplier += f"，电话：{company_info['company_phone']}"
+    if company_info.get("email"):
+        _supplier += f"，邮箱：{company_info['email']}"
+
     gen.set_input_info(product_name=product_name,
+                       recommended_use=company_info.get("recommended_use", ""),
+                       supplier=_supplier,
+                       emergency_phone=company_info.get("emergency_phone", ""),
                        version=version, revision_date=revision_date,
                        revision_log=revision_log)
 
