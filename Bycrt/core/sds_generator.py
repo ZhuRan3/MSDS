@@ -1412,23 +1412,15 @@ class SDSGenerator:
 
         kb_primary = self.FIRST_AID_KB.get(primary_type, self.FIRST_AID_KB["general"])
 
-        # 收集所有适用化学品类型的补充建议（去重：跳过与主类型语义重复的内容）
+        # 收集其他类型的特异性建议（仅提取真正独特的知识点，不追加完整段落）
         extra_by_route = {"inhalation": [], "skin": [], "eye": [], "ingestion": []}
-        def _is_semantic_dup(text_a: str, text_b: str) -> bool:
-            """简单语义去重：提取数字和关键词，判断是否实质相同"""
-            import re
-            nums_a = set(re.findall(r'\d+', text_a))
-            nums_b = set(re.findall(r'\d+', text_b))
-            # 如果数字集合完全相同，大概率是相同内容
-            if nums_a and nums_b and nums_a == nums_b:
-                return True
-            # 如果两个文本的前20个字符完全相同（去掉"立即""迅速"等前缀词后），视为重复
-            import re as _re
-            clean_a = _re.sub(r'^(立即|迅速|马上|应|须|务必)', '', text_a[:30])
-            clean_b = _re.sub(r'^(立即|迅速|马上|应|须|务必)', '', text_b[:30])
-            if clean_a == clean_b:
-                return True
-            return False
+        # 特异性关键词：只有包含这些关键词的短语才是真正独特的补充建议
+        _unique_keywords = {
+            "inhalation": ["氰化物", "硫化氢", "一氧化碳", "胆碱酯酶", "阿托品", "解毒"],
+            "skin": ["化学中和", "螯合剂", "络合", "特异"],
+            "eye": ["眼科", "角膜", "继发性", "青光眼"],
+            "ingestion": ["活性炭", "洗胃", "解毒剂", "特异性"],
+        }
         for t in type_priority:
             if t == primary_type or t not in chem_types:
                 continue
@@ -1436,14 +1428,14 @@ class SDSGenerator:
             if not kb_t:
                 continue
             for route in ["inhalation", "skin", "eye", "ingestion"]:
-                primary_text = kb_primary.get(route, "")
                 alt_text = kb_t.get(route, "")
-                # 跳过空文本、完全相同文本、或语义重复文本
-                if not alt_text or alt_text == primary_text:
+                if not alt_text:
                     continue
-                if _is_semantic_dup(primary_text, alt_text):
-                    continue
-                extra_by_route[route].append(alt_text)
+                # 仅当alt_text包含该途径的特异性关键词时才追加
+                keywords = _unique_keywords.get(route, [])
+                if any(kw in alt_text for kw in keywords):
+                    if alt_text not in extra_by_route[route]:
+                        extra_by_route[route].append(alt_text)
 
         # 混合物模式：聚合所有组分的特异性注释和靶器官建议
         mixture_notes = {"inhalation": [], "skin": [], "eye": [], "ingestion": []}
@@ -1945,7 +1937,13 @@ class SDSGenerator:
                 # 纯物质：根据化学品类型推断pH
                 chem_types_s9 = self._get_chemical_types()
                 if "corrosive_acid" in chem_types_s9:
-                    ph_val = "<1 (强酸性) [待确认]"
+                    # 无机强酸pH<1，有机酸（如苯酚、乙酸）为弱酸性
+                    strong_acid_formulas = ["HCl", "H2SO4", "HNO3", "H3PO4", "HF",
+                                           "HClO4", "HBr", "HI"]
+                    if formula_s9 in strong_acid_formulas:
+                        ph_val = "<1 (强酸性) [待确认]"
+                    else:
+                        ph_val = "酸性（弱酸，需实测） [待确认]"
                 elif "corrosive_alkali" in chem_types_s9:
                     ph_val = ">13 (强碱性) [待确认]"
                 else:
