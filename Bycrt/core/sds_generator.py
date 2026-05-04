@@ -1689,13 +1689,13 @@ class SDSGenerator:
             cleanup = "收集泄漏物。回收利用。避免产生粉尘。"
         else:
             cleanup = "用惰性吸收材料（砂土、蛭石等）吸收泄漏物。收集于适当的废弃物容器中。"
-        # 腐蚀品中和处理
-        if is_corrosive and not is_gas and not is_solid_metal:
+        # 腐蚀品中和处理（液体和腐蚀性固体均需中和）
+        if is_corrosive and not is_gas:
             chem_types_s6 = self._get_chemical_types()
             if "corrosive_acid" in chem_types_s6:
                 cleanup += "用石灰石、苏打灰或石灰中和酸液后再行清理。"
             elif "corrosive_alkali" in chem_types_s6:
-                cleanup += "用弱酸（如稀醋酸）中和碱液后再行清理。"
+                cleanup += "用弱酸（如稀醋酸或柠檬酸）中和碱液后再行清理。"
         if is_flammable and not is_gas:
             cleanup += "通风。"
 
@@ -2478,9 +2478,9 @@ class SDSGenerator:
             "note": "中和处理应缓慢进行，避免剧烈放热。操作人员应穿戴防护装备。",
         },
         "toxic": {
-            "method": "用焚烧法或化学法处理。含卤素有机物焚烧温度不低于1200°C，停留时间不小于2秒，确保完全分解防止产生二噁英。焚烧需配备高效洗涤器和除尘装置。不得与一般废物混合。委托有资质的危险废物处理单位处理。",
+            "method": "用焚烧法或化学法处理。焚烧需配备高效洗涤器和除尘装置。不得与一般废物混合。委托有资质的危险废物处理单位处理。",
             "container": "废弃容器按危险废物管理，交由有资质单位处理。不得作为普通废金属回收。容器上应保持危险废物标签。空容器可能残留有害蒸气，不得切割、焊接。",
-            "regulation": "按具体成分确定危险废物类别（HW06有机溶剂废物、HW42废有机溶剂，含卤素废物属HW39）。须执行《危险废物转移联单管理办法》。",
+            "regulation": "按具体成分确定危险废物类别（如HW06有机溶剂废物、HW42废有机溶剂等）。须执行《危险废物转移联单管理办法》。",
             "note": "处置过程中应防止有毒物质扩散。操作人员必须穿戴适当的防护装备。严禁直接排入下水道。",
         },
         "heavy_metal": {
@@ -2570,11 +2570,37 @@ class SDSGenerator:
             if has_aquatic_toxicity:
                 extra_waste_notes += "\n\n**环境警示**: 本品含对水生环境有害组分，废弃处置时应防止进入水体和下水道。"
 
+        # 含卤素检测：仅当组分含氯/氟/溴时追加卤素焚烧要求
+        _halogen_cas = ["75-09-2","67-66-3","71-55-6","127-18-4","107-06-2"]
+        _halogen_formulas = ["Cl","F","Br"]
+        _has_halogen = False
+        all_comps = getattr(self, '_components_data', []) if getattr(self, '_is_mixture', False) else []
+        if not all_comps:
+            # 纯物质检查
+            kb_hal = getattr(self, '_kb_data', {})
+            cas_hal = str(kb_hal.get("cas_number", ""))
+            fm_hal = str(kb_hal.get("molecular_formula", ""))
+            if cas_hal in _halogen_cas or any(h in fm_hal for h in _halogen_formulas):
+                _has_halogen = True
+        else:
+            for comp in all_comps:
+                cas_c = str(comp.get("cas_number", ""))
+                fm_c = str(comp.get("molecular_formula", ""))
+                if cas_c in _halogen_cas or any(h in fm_c for h in _halogen_formulas):
+                    _has_halogen = True
+                    break
+
+        method_text = kb['method']
+        regulation_text = kb['regulation']
+        if _has_halogen:
+            method_text += " 含卤素有机物焚烧温度不低于1200°C，停留时间不小于2秒，确保完全分解防止产生二噁英。"
+            regulation_text = regulation_text.replace("等）。", "，含卤素废物属HW39）。")
+
         return (
             f"# 第十三部分：废弃处置\n\n"
-            f"**处置方法**: {kb['method']}\n\n"
+            f"**处置方法**: {method_text}\n\n"
             f"**容器处理**: {kb['container']}\n\n"
-            f"**适用的法规**: {kb['regulation']}\n\n"
+            f"**适用的法规**: {regulation_text}\n\n"
             f"**注意事项**: {kb['note']}"
             f"{extra_waste_notes}"
         )
@@ -2778,6 +2804,14 @@ class SDSGenerator:
             intl_regs.append("GB 30000.2-2013《化学品分类和标签规范 第2部分：爆炸物》等系列标准")
 
         all_cn = list(cn_regs) + [r for r in extra_regs if r not in cn_regs]
+        # 去重：保持顺序
+        seen_cn = set()
+        deduped_cn = []
+        for r in all_cn:
+            if r not in seen_cn:
+                seen_cn.add(r)
+                deduped_cn.append(r)
+        all_cn = deduped_cn
 
         return (
             f"# 第十五部分：法规信息\n\n"
@@ -3203,7 +3237,15 @@ def generate_mixture_sds(components_data: List[dict],
     else:
         # 推断外观：根据主组分浓度和物态
         s9.fields["appearance"] = FieldValue(value="液体（根据组分推断）", source="inference")
-    s9.fields["odor"] = FieldValue(value="有特殊气味（含有机溶剂组分）", source="inference")
+    # 气味推断：根据组分类型区分有机溶剂/水溶液
+    _has_organic_solvent = any(
+        ("C" in str(comp.get("molecular_formula", "")) and "H" in str(comp.get("molecular_formula", "")))
+        for comp, _ in comp_with_conc
+    )
+    if _has_organic_solvent:
+        s9.fields["odor"] = FieldValue(value="有特殊气味（含有机溶剂组分）", source="inference")
+    else:
+        s9.fields["odor"] = FieldValue(value="根据组分而定", source="inference")
     # 熔点聚合（DEF-110: 仅取挥发性组分的熔点范围）
     melting_points = []
     for comp, conc in comp_with_conc:
@@ -3421,13 +3463,27 @@ def generate_mixture_sds(components_data: List[dict],
     for cls_item in mixture_classifications:
         hazard = cls_item.get("hazard", "")
         if "致癌" in hazard:
-            if "carcinogenicity_ghs" not in s11.fields or "待确认" in str(s11.fields.get("carcinogenicity_ghs", "")):
+            existing = str(s11.fields.get("carcinogenicity_ghs", ""))
+            should_override = (
+                "carcinogenicity_ghs" not in s11.fields or
+                "待确认" in existing or "无分类" in existing or
+                "无需" in existing or not existing.strip()
+            )
+            if should_override:
                 s11.fields["carcinogenicity_ghs"] = FieldValue(value=hazard, source="classification")
     # 生殖毒性 — 混合物分类中已有
     for cls_item in mixture_classifications:
         hazard = cls_item.get("hazard", "")
         if "生殖" in hazard:
-            if "reproductive_toxicity_category" not in s11.fields or "待确认" in str(s11.fields.get("reproductive_toxicity_category", "")):
+            existing = str(s11.fields.get("reproductive_toxicity_category", ""))
+            should_override = (
+                "reproductive_toxicity_category" not in s11.fields or
+                "待确认" in existing or
+                "无分类" in existing or
+                "无需" in existing or
+                not existing.strip()
+            )
+            if should_override:
                 s11.fields["reproductive_toxicity_category"] = FieldValue(value=hazard, source="classification")
     # 特异性靶器官毒性 — 归并去重，按Cat等级排序
     stot_se = [str(g) for g in all_comp_ghs if "靶器官" in str(g) and "单次" in str(g)]
