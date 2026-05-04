@@ -454,16 +454,22 @@ H314 造成严重皮肤灼伤和眼睛损伤
 
 ## 保存路径
 
+每种化学品单独文件夹，包含 MD + PDF + JSON 三件套。
+
 纯净物：
 ```
-./Bycrt/output/pure/MSDS_{化学品名}.md      ← L5生成，L6审查
-./Bycrt/output/pure/MSDS_{化学品名}.pdf     ← L7审查通过后生成
+./Bycrt/output/pure/{化学品名}/
+  ├── MSDS_{化学品名}.md      ← L5生成，L6审查
+  ├── MSDS_{化学品名}.pdf     ← L7审查通过后生成
+  └── MSDS_{化学品名}.json    ← 结构化数据（可编辑覆写）
 ```
 
 混合物：
 ```
-./Bycrt/output/mixture/MSDS_{配方名}.md     ← L5生成，L6审查
-./Bycrt/output/mixture/MSDS_{配方名}.pdf    ← L7审查通过后生成
+./Bycrt/output/mixture/{配方名}/
+  ├── MSDS_{配方名}.md        ← L5生成，L6审查
+  ├── MSDS_{配方名}.pdf       ← L7审查通过后生成
+  └── MSDS_{配方名}.json      ← 结构化数据（可编辑覆写）
 ```
 
 ## 触发审查（自动审查工具）

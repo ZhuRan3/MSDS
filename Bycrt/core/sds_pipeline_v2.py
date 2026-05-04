@@ -159,7 +159,7 @@ class SDSPipeline:
         # 保存
         if not output_path:
             safe_name = (product_name or pool.name_cn or query).replace(" ", "_")
-            output_path = str(OUTPUT_DIR / "pure" / f"MSDS_{safe_name}.md")
+            output_path = str(OUTPUT_DIR / "pure" / safe_name / f"MSDS_{safe_name}.md")
 
         self._save_output(output_path, content, generate_pdf=pdf)
 
@@ -281,7 +281,7 @@ class SDSPipeline:
         # 保存
         if not output_path:
             safe_name = (product_name or "mixture_" + datetime.now().strftime("%Y%m%d%H%M%S")).replace(" ", "_")
-            output_path = str(OUTPUT_DIR / "mixture" / f"MSDS_{safe_name}.md")
+            output_path = str(OUTPUT_DIR / "mixture" / safe_name / f"MSDS_{safe_name}.md")
 
         self._save_output(output_path, content, generate_pdf=pdf)
 
@@ -452,12 +452,22 @@ class SDSPipeline:
         return new_content
 
     def _save_output(self, path: str, content: str, generate_pdf: bool = False):
-        """保存输出文件（MD + 可选 PDF）"""
+        """保存输出文件（MD + 可选 PDF + JSON）"""
         p = Path(path)
         p.parent.mkdir(parents=True, exist_ok=True)
         with open(p, "w", encoding="utf-8") as f:
             f.write(content)
-        print(f"  已保存: {path}")
+        print(f"  已保存MD: {path}")
+
+        # 导出结构化JSON
+        try:
+            from msds_editor import MSDSEditor
+            editor = MSDSEditor()
+            json_path = str(p.with_suffix(".json"))
+            editor.export_json(content, json_path)
+            print(f"  已保存JSON: {json_path}")
+        except (ImportError, OSError, ValueError) as e:
+            print(f"  [WARN] JSON导出失败: {e}")
 
         if generate_pdf:
             try:
