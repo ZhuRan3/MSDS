@@ -156,10 +156,15 @@ class SDSPipeline:
         reviewer = self.MSDSReviewer.from_content(content)
         review_report = reviewer.review()
 
-        # 保存
+        # 保存：自动将扁平路径修正为子文件夹结构
+        safe_name = (product_name or pool.name_cn or query).replace(" ", "_")
         if not output_path:
-            safe_name = (product_name or pool.name_cn or query).replace(" ", "_")
             output_path = str(OUTPUT_DIR / "pure" / safe_name / f"MSDS_{safe_name}.md")
+        else:
+            p = Path(output_path)
+            if p.parent.name == "mixture" or p.parent.name == "pure":
+                stem = p.stem.replace("MSDS_", "")
+                output_path = str(p.parent / stem / p.name)
 
         self._save_output(output_path, content, generate_pdf=pdf)
 
@@ -278,10 +283,17 @@ class SDSPipeline:
         reviewer = self.MSDSReviewer.from_content(content)
         review_report = reviewer.review()
 
-        # 保存
+        # 保存：自动将扁平路径修正为子文件夹结构
+        safe_name = (product_name or "mixture_" + datetime.now().strftime("%Y%m%d%H%M%S")).replace(" ", "_")
         if not output_path:
-            safe_name = (product_name or "mixture_" + datetime.now().strftime("%Y%m%d%H%M%S")).replace(" ", "_")
             output_path = str(OUTPUT_DIR / "mixture" / safe_name / f"MSDS_{safe_name}.md")
+        else:
+            # 如果用户传入的路径是扁平的(如 output/mixture/MSDS_xxx.md)，
+            # 自动修正为 output/mixture/xxx/MSDS_xxx.md
+            p = Path(output_path)
+            if p.parent.name == "mixture" or p.parent.name == "pure":
+                stem = p.stem.replace("MSDS_", "")
+                output_path = str(p.parent / stem / p.name)
 
         self._save_output(output_path, content, generate_pdf=pdf)
 

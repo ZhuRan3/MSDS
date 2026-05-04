@@ -472,6 +472,34 @@ H314 造成严重皮肤灼伤和眼睛损伤
   └── MSDS_{配方名}.json      ← 结构化数据（可编辑覆写）
 ```
 
+## AI手动编辑链路（JSON覆写）
+
+生成后的MSDS可通过JSON编辑→重新生成MD/PDF的链路进行修改：
+
+### 步骤1: 导出可编辑JSON（生成时自动导出）
+```bash
+# 生成时自动在子文件夹内创建.json文件
+python core/sds_pipeline_v2.py --query "乙醇" --name "乙醇"
+# 产出: output/pure/乙醇/MSDS_乙醇.json
+```
+
+### 步骤2: 编辑JSON
+打开 `.json` 文件，修改需要调整的字段值。JSON结构按16部分组织，每个字段包含 `value` 和 `source`。
+
+### 步骤3: 应用修改，重新生成MD/PDF
+```bash
+python core/sds_pipeline_v2.py --override "output/pure/乙醇/MSDS_乙醇.json"
+```
+
+### 审查+编辑模式
+```bash
+python core/sds_pipeline_v2.py --query "乙醇" --review-edit
+# 自动审查高风险字段，输出问题列表和JSON路径
+# 编辑JSON后用 --override 应用
+```
+
+**Claude使用场景**: 当Claude审查发现具体字段问题时，可直接编辑JSON文件，然后运行 `--override` 重新生成，无需修改代码。
+
 ## 触发审查（自动审查工具）
 
 ```bash
