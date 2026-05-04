@@ -27,8 +27,7 @@
       ],
       "name_hints": [
         "酸"
-      ],
-      "default_if_no_base_match": true
+      ]
     },
     {
       "tag": "corrosive_alkali",
@@ -41,11 +40,17 @@
         "NaOH",
         "KOH",
         "Ca(OH)2",
-        "NH3"
+        "NH3",
+        "NaClO",
+        "Na2CO3",
+        "NaHCO3"
       ],
       "name_hints": [
         "碱",
-        "氢氧化"
+        "氢氧化",
+        "次氯酸钠",
+        "碳酸钠",
+        "碳酸氢钠"
       ]
     },
     {

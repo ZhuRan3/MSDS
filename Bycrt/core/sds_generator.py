@@ -953,15 +953,38 @@ class SDSGenerator:
             # 检查GHS关键词
             if not any(kw in ghs_text for kw in ghs_kw):
                 continue
-            # 氧化剂优先：有氧化性分类时不使用酸碱默认匹配
+            # 酸碱需要根据配方/名称精确区分
             if tag == "corrosive_acid":
                 if is_acid_hint and not is_alkali_hint:
                     types.add(tag)
-                elif rule.get("default_if_no_base_match") and not is_alkali_hint and not has_oxidizer_class:
-                    types.add(tag)
+                # 不再默认归类为酸 — 混合物按组分推断
+                elif not is_alkali_hint and not is_acid_hint:
+                    # 混合物模式：检查组分中是否有碱性成分
+                    if getattr(self, '_is_mixture', False):
+                        _mixture_components = getattr(self, '_components_data', [])
+                        _has_base_comp = any(
+                            any(h in str(c.get("molecular_formula", "")) or h in str(c.get("chemical_name_cn", ""))
+                                for h in alkali_formula_hints + alkali_name_hints)
+                            for c in _mixture_components
+                        )
+                        if not _has_base_comp:
+                            types.add(tag)
+                    else:
+                        types.add(tag)
             elif tag == "corrosive_alkali":
                 if is_alkali_hint and not is_acid_hint:
                     types.add(tag)
+                elif not is_alkali_hint and not is_acid_hint:
+                    # 混合物模式：检查组分中是否有碱性成分
+                    if getattr(self, '_is_mixture', False):
+                        _mixture_components = getattr(self, '_components_data', [])
+                        _has_base_comp = any(
+                            any(h in str(c.get("molecular_formula", "")) or h in str(c.get("chemical_name_cn", ""))
+                                for h in alkali_formula_hints + alkali_name_hints)
+                            for c in _mixture_components
+                        )
+                        if _has_base_comp:
+                            types.add(tag)
             else:
                 types.add(tag)
 
@@ -1224,23 +1247,21 @@ class SDSGenerator:
         elif "气体" in ghs_text:
             state = "气体。"
 
-        # 先输出外观描述
+        # 先输出外观描述或物理状态（二选一，不重复）
         if appearance_desc:
             parts.append(appearance_desc)
+            _need_state_prefix = False
         elif state:
-            parts.append(state)
+            parts.append(state.rstrip("。"))
+            _need_state_prefix = False
+        else:
+            _need_state_prefix = False
 
         # 物理化学危险
         if "易燃液体" in ghs_text or "易燃固体" in ghs_text:
-            if not appearance_desc:
-                parts.append(state + "极易燃烧，蒸气与空气可形成爆炸性混合物")
-            else:
-                parts.append("极易燃烧，蒸气与空气可形成爆炸性混合物")
+            parts.append("极易燃烧，蒸气与空气可形成爆炸性混合物")
         elif "易燃" in ghs_text:
-            if not appearance_desc:
-                parts.append(state + "具易燃性")
-            else:
-                parts.append("具易燃性")
+            parts.append("具易燃性")
         if "氧化性" in ghs_text:
             parts.append("可加剧燃烧")
         if "加压气体" in ghs_text:
@@ -1391,8 +1412,23 @@ class SDSGenerator:
 
         kb_primary = self.FIRST_AID_KB.get(primary_type, self.FIRST_AID_KB["general"])
 
-        # 收集所有适用化学品类型的补充建议（而非仅用 primary_type）
+        # 收集所有适用化学品类型的补充建议（去重：跳过与主类型语义重复的内容）
         extra_by_route = {"inhalation": [], "skin": [], "eye": [], "ingestion": []}
+        def _is_semantic_dup(text_a: str, text_b: str) -> bool:
+            """简单语义去重：提取数字和关键词，判断是否实质相同"""
+            import re
+            nums_a = set(re.findall(r'\d+', text_a))
+            nums_b = set(re.findall(r'\d+', text_b))
+            # 如果数字集合完全相同，大概率是相同内容
+            if nums_a and nums_b and nums_a == nums_b:
+                return True
+            # 如果两个文本的前20个字符完全相同（去掉"立即""迅速"等前缀词后），视为重复
+            import re as _re
+            clean_a = _re.sub(r'^(立即|迅速|马上|应|须|务必)', '', text_a[:30])
+            clean_b = _re.sub(r'^(立即|迅速|马上|应|须|务必)', '', text_b[:30])
+            if clean_a == clean_b:
+                return True
+            return False
         for t in type_priority:
             if t == primary_type or t not in chem_types:
                 continue
@@ -1402,10 +1438,12 @@ class SDSGenerator:
             for route in ["inhalation", "skin", "eye", "ingestion"]:
                 primary_text = kb_primary.get(route, "")
                 alt_text = kb_t.get(route, "")
-                # 仅当替代类型的建议有主类型缺少的关键内容时才追加
-                if alt_text and alt_text != primary_text:
-                    # 提取关键差异部分（简化：直接追加标注来源类型）
-                    extra_by_route[route].append(alt_text)
+                # 跳过空文本、完全相同文本、或语义重复文本
+                if not alt_text or alt_text == primary_text:
+                    continue
+                if _is_semantic_dup(primary_text, alt_text):
+                    continue
+                extra_by_route[route].append(alt_text)
 
         # 混合物模式：聚合所有组分的特异性注释和靶器官建议
         mixture_notes = {"inhalation": [], "skin": [], "eye": [], "ingestion": []}
@@ -1577,9 +1615,22 @@ class SDSGenerator:
                 if sub and sub not in all_items:
                     all_items.add(sub)
                     unique_items.append(sub)
+        # 先确定禁止列表，从适用列表中移除被禁止的灭火剂
+        prohibited = prohibited_parts[0] if prohibited_parts else ""
+        if not prohibited:
+            prohibited = "无特殊禁止要求。"
+        # 收集禁止项中的灭火剂名称
+        _prohibited_items = set()
+        for p in prohibited_parts:
+            for sub in re.split(r'[、，,；;]', p):
+                sub = sub.strip().replace('禁止使用', '').replace('禁止用水', '水').replace('禁止将水', '水')
+                if sub and len(sub) <= 6:
+                    _prohibited_items.add(sub)
+        # 从适用列表中移除被禁止的
+        if _prohibited_items:
+            unique_items = [i for i in unique_items if i not in _prohibited_items]
         if unique_items:
             media = '、'.join(unique_items) + '。'
-        prohibited = prohibited_parts[0] if prohibited_parts else "无特殊禁止要求。"
         # 取最严格的消防建议
         advice = advice_parts[0] if advice_parts else ""
 
@@ -2247,6 +2298,32 @@ class SDSGenerator:
             src = s11.fields["eye_damage_category"].source
             if src != "classification":
                 del s11.fields["eye_damage_category"]
+
+        # S11与S2分类同步：当S2有致癌性/皮肤致敏/生殖毒性等分类时，
+        # S11中对应字段应反映S2分类而非"无可用数据"
+        _s11_sync_fields = {
+            "致癌": "carcinogenicity_ghs",
+            "皮肤致敏": "skin_sensitization",
+            "呼吸致敏": "respiratory_sensitization",
+            "致突变": "mutagenicity",
+            "生殖毒性": "reproductive_toxicity_category",
+            "致畸": "developmental_toxicity",
+        }
+        if s2_ghs_classes:
+            ghs_list = s2_ghs_classes.value if s2_ghs_classes else []
+            for cls_item in ghs_list:
+                cls_str = str(cls_item)
+                for kw, field_key in _s11_sync_fields.items():
+                    if kw in cls_str:
+                        existing = str(s11.fields.get(field_key, ""))
+                        should_override = (
+                            field_key not in s11.fields or
+                            "待确认" in existing or "无分类" in existing or
+                            "无可用数据" in existing or "无需" in existing or
+                            not existing.strip()
+                        )
+                        if should_override:
+                            s11.fields[field_key] = FieldValue(value=cls_str, source="classification")
 
         def tox_field(key, label):
             val = self._val(11, key, "")
@@ -3635,6 +3712,13 @@ def generate_mixture_sds(components_data: List[dict],
     s10 = gen.document.sections[10]
     all_incompatibles = set()
     all_decomp = set()
+    # 收集混合物自身组分名称，用于过滤禁配物中的自身成分
+    _component_names = set()
+    for comp in components_data:
+        cn = str(comp.get("chemical_name_cn", ""))
+        if cn:
+            _component_names.add(cn)
+    _component_names.add("水")  # 水基混合物中水是组分，不应列为禁配物
     for comp in components_data:
         inc = str(comp.get("incompatible_materials", ""))
         if inc and "无可用" not in inc:
@@ -3642,7 +3726,8 @@ def generate_mixture_sds(components_data: List[dict],
             clean_inc = inc.replace(" [待确认]", "").replace("[待确认]", "")
             for item in re.split(r'[、,，;；]', clean_inc):
                 item = item.strip()
-                if item:
+                # 跳过自身组分（如水基产品不应将"水"列为禁配物）
+                if item and item not in _component_names:
                     all_incompatibles.add(item)
         dec = str(comp.get("hazardous_decomposition", ""))
         if dec and "无可用" not in dec:

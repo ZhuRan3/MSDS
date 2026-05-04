@@ -825,6 +825,51 @@
         "P501"
       ]
     },
+    "氧化性液体": {
+      "prevention": [
+        "P210",
+        "P220",
+        "P221",
+        "P280"
+      ],
+      "response": [
+        "P370+P380",
+        "P371+P380+P375"
+      ],
+      "storage": [
+        "P403+P235"
+      ],
+      "disposal": [
+        "P501"
+      ]
+    },
+    "氧化性固体": {
+      "prevention": [
+        "P210",
+        "P220",
+        "P221",
+        "P280"
+      ],
+      "response": [
+        "P370+P380"
+      ],
+      "storage": [],
+      "disposal": [
+        "P501"
+      ]
+    },
+    "危害水生环境-急性": {
+      "prevention": [
+        "P273"
+      ],
+      "response": [
+        "P391"
+      ],
+      "storage": [],
+      "disposal": [
+        "P501"
+      ]
+    },
     "特异性靶器官毒性-单次 Cat 3": {
       "prevention": [
         "P261",
