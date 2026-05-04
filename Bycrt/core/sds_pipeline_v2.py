@@ -107,12 +107,28 @@ class SDSPipeline:
         # 导出为dict用于SDS生成
         data_dict = pool.to_dict()
         coverage = self.retriever.get_coverage(pool)
+        quality_coverage = self.retriever.get_quality_coverage(pool)
         sources = pool.get_source_summary()
 
         print(f"  字段覆盖: {len(pool.evidences)}个, 覆盖率: {coverage*100:.0f}%")
+        print(f"  高质量覆盖率: {quality_coverage*100:.0f}% (conf≥0.7)")
         print(f"  缺失字段: {pool.missing_fields}")
 
+        # 数据冲突警告
+        if pool.conflicts:
+            print(f"  [WARN] 检测到 {len(pool.conflicts)} 个数据冲突:")
+            for c in pool.conflicts:
+                print(f"    - {c['field']}: {c['values']}")
+        low_conf = self.retriever.get_low_confidence_fields(pool)
+        if low_conf:
+            print(f"  [WARN] {len(low_conf)} 个低置信度字段: {', '.join(low_conf[:5])}")
+
         # L4: 分类（纯净物直接从GHS分类构建）
+        # 将冲突信息注入data_dict，供生成器使用
+        if pool.conflicts:
+            data_dict["_data_conflicts"] = [
+                f"{c['field']}: 多源数据不一致(已取最高优先级来源)" for c in pool.conflicts
+            ]
         classifications = self._build_pure_classifications(data_dict)
 
         # L5: SDS生成

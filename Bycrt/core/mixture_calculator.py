@@ -188,6 +188,29 @@ class MixtureCalculator:
             if c.concentration <= 0:
                 raise ValueError(f"组分 {c.name} 浓度必须>0")
 
+    @staticmethod
+    def _infer_inhalation_form(component: Component) -> str:
+        """根据组分物理属性推断吸入形式: gas/vapor/dust"""
+        bp = component.boiling_point or component.initial_boiling_point
+        # 气体: 沸点很低(通常 < -10°C)
+        if bp is not None and bp < -10:
+            return "inhalation_gas"
+        # 蒸汽: 液体(有沸点且 > -10°C) 或有闪点(液态易燃)
+        if bp is not None and bp >= -10:
+            return "inhalation_vapor"
+        if component.flash_point is not None:
+            return "inhalation_vapor"
+        # 检查外观描述
+        appearance = getattr(component, 'appearance', '') or ''
+        if any(kw in appearance for kw in ['气体', '气态']):
+            return "inhalation_gas"
+        if any(kw in appearance for kw in ['固体', '粉末', '结晶', '颗粒']):
+            return "inhalation_dust"
+        if any(kw in appearance for kw in ['液体', '溶液']):
+            return "inhalation_vapor"
+        # 默认: 蒸汽(最常见场景)
+        return "inhalation_vapor"
+
     def _get_ate(self, component: Component, route: str) -> Optional[float]:
         """获取组分的ATE值（优先实验值，其次GHS分类换算）"""
         # 优先使用实验值
@@ -208,17 +231,28 @@ class MixtureCalculator:
 
         for cls_str in component.ghs_classifications:
             if target_prefix in cls_str:
-                # 提取分类号，如 "急性毒性-经口 Cat 4" → 4
+                # 提取分类号，支持 "Cat 4" 和 "类别4" 两种格式
                 try:
-                    cat_num = int(cls_str.split("Cat")[-1].strip().split()[0])
-                    table = ACUTE_TOXITY_CONVERSION.get(f"{route}" if route != "inhalation" else "inhalation_vapor", {})
+                    cat_str = cls_str
+                    # 先尝试 Cat 格式
+                    if "Cat" in cat_str:
+                        cat_num = int(cat_str.split("Cat")[-1].strip().split()[0])
+                    elif "类别" in cat_str:
+                        cat_num = int(re.search(r'类别\s*(\d+)', cat_str).group(1))
+                    else:
+                        continue
+                    if route == "inhalation":
+                        table_key = self._infer_inhalation_form(component)
+                    else:
+                        table_key = route
+                    table = ACUTE_TOXITY_CONVERSION.get(table_key, {})
                     if cat_num in table:
                         ate = table[cat_num]["ate"]
                         self.result.calculation_log.append(
-                            f"  {component.name}: 无实验值，从'{cls_str}'换算ATE={ate} mg/kg"
+                            f"  {component.name}: 无实验值，从'{cls_str}'换算ATE={ate} (形式: {table_key})"
                         )
                         return ate
-                except (ValueError, IndexError):
+                except (ValueError, IndexError, AttributeError):
                     continue
 
         return None
@@ -285,14 +319,19 @@ class MixtureCalculator:
 
         return ate_mix
 
-    def classify_acute_toxicity(self, ate: float, route: str) -> Optional[Dict]:
+    def classify_acute_toxicity(self, ate: float, route: str,
+                                  inhalation_form: str = "") -> Optional[Dict]:
         """根据ATE值判断急性毒性分类"""
-        thresholds = ACUTE_TOXITY_THRESHOLDS.get(route, [])
+        if route == "inhalation" and inhalation_form:
+            threshold_key = inhalation_form
+        elif route == "inhalation":
+            threshold_key = "inhalation_vapor"  # 默认蒸汽
+        else:
+            threshold_key = route
+        thresholds = ACUTE_TOXITY_THRESHOLDS.get(threshold_key, [])
         for threshold, cat in thresholds:
             if ate <= threshold:
-                table = ACUTE_TOXITY_CONVERSION.get(
-                    route if route != "inhalation" else "inhalation_vapor", {}
-                )
+                table = ACUTE_TOXITY_CONVERSION.get(threshold_key, {})
                 info = table.get(cat, {})
                 # 计算置信度: ATE距阈值越远置信度越高
                 confidence = min(0.95, 0.7 + 0.25 * (1.0 - ate / threshold))
@@ -690,7 +729,31 @@ class MixtureCalculator:
             if cls:
                 self.result.classifications.append(cls)
 
-        # 3. 皮肤腐蚀/刺激
+        # 3. 急性毒性 - 吸入（根据主要组分推断物理形式）
+        ate_inhalation = self.calculate_ate("inhalation")
+        if ate_inhalation:
+            self.result.ate_inhalation = ate_inhalation
+            # 确定主要吸入形式（取浓度最高的组分的物理形式）
+            best_form = "inhalation_vapor"
+            max_conc = 0.0
+            for c in self.components:
+                if not c.is_unknown_toxicity and c.concentration > max_conc:
+                    form = self._infer_inhalation_form(c)
+                    max_conc = c.concentration
+                    best_form = form
+            cls = self.classify_acute_toxicity(ate_inhalation, "inhalation",
+                                                inhalation_form=best_form)
+            if cls:
+                self.result.classifications.append(cls)
+                self.result.calculation_log.append(
+                    f"  → 吸入分类({best_form}): {cls['hazard']}, ATE={cls['ate']:.2f} mg/L"
+                )
+            else:
+                self.result.calculation_log.append(
+                    f"  → 吸入ATE={ate_inhalation:.2f}，不分类 (形式: {best_form})"
+                )
+
+        # 4. 皮肤腐蚀/刺激
         skin_results = self.check_skin_corrosion()
         self.result.classifications.extend(skin_results)
 

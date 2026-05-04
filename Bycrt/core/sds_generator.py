@@ -368,6 +368,10 @@ class SDSGenerator:
     def set_chemical_data(self, data: dict):
         """设置化学品基础数据（来自KB或PubChem）"""
         self._kb_data = data
+        # 传播数据冲突信息到review_flags
+        if "_data_conflicts" in data:
+            for conflict_msg in data["_data_conflicts"]:
+                self.document.review_flags.append(f"数据冲突: {conflict_msg}")
         # 第一部分：化学品标识
         s1 = self.document.sections[1]
         mappings = {
@@ -796,8 +800,15 @@ class SDSGenerator:
             v = fv.value
             if v is not None and v != "" and v != []:
                 val_str = str(v)
+                # 低置信度标记（confidence < 0.7 时加 [待确认]）
+                if fv.confidence < 0.7 and "[待确认]" not in val_str:
+                    val_str += " [待确认]"
+                    fv.needs_review = True
+                    self.document.review_flags.append(
+                        f"第{section_id}部分-{field_key}: 低置信度({fv.confidence:.1f})需核实"
+                    )
                 # 字段来源渲染（HTML注释，不影响Markdown显示）
-                if fv.source and fv.source not in ("template", "input") and fv.confidence >= 0.7:
+                if fv.source and fv.source not in ("template", "input"):
                     val_str += f" <!-- src:{fv.source} conf:{fv.confidence:.1f} -->"
                 return val_str
         self.document.review_flags.append(f"第{section_id}部分-{field_key}: 缺少数据")
@@ -950,6 +961,20 @@ class SDSGenerator:
         """快速判断是否属于某种化学品类型"""
         return type_name in self._get_chemical_types()
 
+    def _validate_llm_first_aid(self, result: dict, is_corrosive: bool, is_toxic: bool) -> list:
+        """校验LLM生成的急救内容，返回警告列表并修正危险建议"""
+        warnings = []
+        for key in ["inhalation", "skin", "eye", "ingestion"]:
+            text = result.get(key, "")
+            if not text:
+                continue
+            # 腐蚀性物质禁止催吐
+            if is_corrosive and "催吐" in text:
+                text = text.replace("催吐", "**禁止催吐**（腐蚀性物质催吐可造成食道二次损伤）")
+                result[key] = text
+                warnings.append(f"{key}: 自动修正了腐蚀性物质的催吐建议")
+        return warnings
+
     def _try_llm_enhance(self, section_id: int, template_content: str) -> str:
         """尝试用LLM增强章节内容，失败时返回原始模板内容"""
         if not self.use_llm:
@@ -970,12 +995,17 @@ class SDSGenerator:
             if section_id == 4:
                 result = generate_first_aid_section(chem_data, is_corrosive, is_toxic)
                 if result and isinstance(result, dict):
+                    # 安全校验
+                    warnings = self._validate_llm_first_aid(result, is_corrosive, is_toxic)
+                    for w in warnings:
+                        self.document.review_flags.append(f"S4-LLM校验: {w}")
                     parts = []
                     for key in ["inhalation", "skin", "eye", "ingestion"]:
                         if result.get(key):
                             parts.append(f"**{key}**: {result[key]}")
                     if parts:
-                        return "# 第四部分：急救措施\n\n" + "\n\n".join(parts) + "\n\n---"
+                        disclaimer = "\n\n> **[AI生成-待医疗专业人员审核]** 以上急救措施由AI辅助生成，使用前须经有资质的医务人员确认。"
+                        return "# 第四部分：急救措施\n\n" + "\n\n".join(parts) + disclaimer + "\n\n---"
             elif section_id == 5:
                 result = generate_firefighting_section(chem_data, is_flammable, is_corrosive, is_explosive=False)
                 if result and isinstance(result, dict):
@@ -1138,7 +1168,7 @@ class SDSGenerator:
         else:
             env_hazard_summary = "根据现有信息无需进行分类。"
         # 其它危害
-        other_hazard = "无数据资料。"
+        other_hazard = "无数据资料 [待确认]。"
 
         return (
             f"# 第二部分：危险性概述\n\n"
@@ -1327,10 +1357,10 @@ class SDSGenerator:
     }
 
     def generate_section_4(self) -> str:
-        """第四部分：急救措施（基于化学品类型的特异性建议）"""
+        """第四部分：急救措施（聚合所有适用化学品类型的特异性建议）"""
         chem_types = self._get_chemical_types()
 
-        # 从最严重的类型选择急救方案（优先级：腐蚀碱 > 腐蚀酸 > 毒性 > 重金属 > 压缩气体 > 氧化 > 易燃 > 通用）
+        # 优先级：腐蚀碱 > 腐蚀酸 > 毒性 > 重金属 > 压缩气体 > 氧化 > 易燃 > 通用
         type_priority = ["corrosive_alkali", "corrosive_acid", "toxic", "heavy_metal",
                          "compressed_gas", "oxidizer", "flammable_liquid", "flammable_solid", "general"]
         primary_type = "general"
@@ -1339,7 +1369,23 @@ class SDSGenerator:
                 primary_type = t
                 break
 
-        kb = self.FIRST_AID_KB.get(primary_type, self.FIRST_AID_KB["general"])
+        kb_primary = self.FIRST_AID_KB.get(primary_type, self.FIRST_AID_KB["general"])
+
+        # 收集所有适用化学品类型的补充建议（而非仅用 primary_type）
+        extra_by_route = {"inhalation": [], "skin": [], "eye": [], "ingestion": []}
+        for t in type_priority:
+            if t == primary_type or t not in chem_types:
+                continue
+            kb_t = self.FIRST_AID_KB.get(t)
+            if not kb_t:
+                continue
+            for route in ["inhalation", "skin", "eye", "ingestion"]:
+                primary_text = kb_primary.get(route, "")
+                alt_text = kb_t.get(route, "")
+                # 仅当替代类型的建议有主类型缺少的关键内容时才追加
+                if alt_text and alt_text != primary_text:
+                    # 提取关键差异部分（简化：直接追加标注来源类型）
+                    extra_by_route[route].append(f"[{t}] {alt_text}")
 
         # 混合物模式：聚合所有组分的特异性注释和靶器官建议
         mixture_notes = {"inhalation": [], "skin": [], "eye": [], "ingestion": []}
@@ -1348,15 +1394,18 @@ class SDSGenerator:
             if agg:
                 mixture_notes = agg.get_first_aid_notes()
 
-        # 注入KB特异性注释（纯物质模式用单组分KB，混合物模式用聚合结果）
+        # 注入KB特异性注释
         route_map = {}
         for route in ["inhalation", "skin", "eye", "ingestion"]:
-            base = kb.get(route, self.FIRST_AID_KB["general"][route])
+            base = kb_primary.get(route, self.FIRST_AID_KB["general"][route])
             extra_lines = []
+            # 多类型聚合的补充建议
+            extra_lines.extend(extra_by_route.get(route, []))
+            # 混合物聚合器注释
             agg_notes = mixture_notes.get(route, [])
             if agg_notes:
                 extra_lines.extend(agg_notes)
-            if not agg_notes:
+            if not agg_notes and not extra_lines:
                 note = self._val(4, f'notes_{route}', "")
                 if note and "待确认" not in note:
                     extra_lines.append(note)
@@ -1365,8 +1414,8 @@ class SDSGenerator:
             else:
                 route_map[route] = base
 
-        rescuer = kb.get("rescuer", self.FIRST_AID_KB["general"]["rescuer"])
-        physician = kb.get("physician", self.FIRST_AID_KB["general"]["physician"])
+        rescuer = kb_primary.get("rescuer", self.FIRST_AID_KB["general"]["rescuer"])
+        physician = kb_primary.get("physician", self.FIRST_AID_KB["general"]["physician"])
 
         # 靶器官摘要（混合物模式）
         if getattr(self, '_is_mixture', False):
@@ -1807,28 +1856,28 @@ class SDSGenerator:
                         or any(n in str(comp.get("chemical_name_cn", "")) for n in alkali_names)):
                         _has_alkali = True
                 if _has_acid and _has_alkali:
-                    ph_val = "取决于配比（需实测）"
+                    ph_val = "取决于配比（需实测） [待确认]"
                 elif _has_acid:
-                    ph_val = "酸性（需实测）"
+                    ph_val = "酸性（需实测） [待确认]"
                 elif _has_alkali:
-                    ph_val = "碱性（需实测）"
+                    ph_val = "碱性（需实测） [待确认]"
                 else:
-                    ph_val = "不适用（有机溶剂混合物）"
+                    ph_val = "不适用（有机溶剂混合物） [待确认]"
             else:
                 # 纯物质：根据化学品类型推断pH
                 chem_types_s9 = self._get_chemical_types()
                 if "corrosive_acid" in chem_types_s9:
-                    ph_val = "<1 (强酸性)"
+                    ph_val = "<1 (强酸性) [待确认]"
                 elif "corrosive_alkali" in chem_types_s9:
-                    ph_val = ">13 (强碱性)"
+                    ph_val = ">13 (强碱性) [待确认]"
                 else:
                     # 中性有机物：乙醇、丙酮等
                     neutral_organics = ["C2H6O", "C3H6O", "C6H12O", "C4H10O"]
                     if formula_s9 in neutral_organics:
                         ph_val = "约7 (中性)"
                     else:
-                        ph_val = "需实测"
-        if ph_val and ph_val != '无可用数据 [待确认]' and '[待确认]' not in ph_val:
+                        ph_val = "需实测 [待确认]"
+        if ph_val and ph_val != '无可用数据 [待确认]':
             ph_row = f"| pH值 | {ph_val} |\n"
 
         # 补充缺失行：嗅觉阈值、pH、凝固点、蒸发速率、相对蒸气密度、分解温度、动态粘度、爆炸特性、氧化性、分子量
@@ -1910,7 +1959,7 @@ class SDSGenerator:
             f"| 自燃温度 | {_s9('autoignition_temp')} °C |\n"
             f"| 分解温度 | {_s9('decomposition_temperature', '无可用数据')} |\n"
             f"| 动态粘度 | 无可用数据 |\n"
-            f"| 爆炸特性 | 无爆炸性 |\n"
+            f"| 爆炸特性 | {'具爆炸性 [待确认]' if self._has_classification('爆炸') or self._has_classification('自反应') or self._has_classification('有机过氧化物') else '无爆炸性'} |\n"
             f"| 氧化性 | {self._get_oxidizer_text()} |"
         )
 
@@ -2211,9 +2260,9 @@ class SDSGenerator:
             for key, desc in self.TOX_SYMPTOMS_KB.items():
                 if key in ("严重眼损伤", "眼刺激"):
                     continue  # 已在上面单独处理
-                # 模糊匹配分类名
-                key_parts = key.replace("STOT-", "").replace("单次", "").replace("反复", "").split("-")
-                if any(kp in hazard for kp in key_parts if len(kp) > 1):
+                # 精确匹配分类名（完整关键词匹配，而非拆分片段）
+                _key_normalized = key.replace("STOT-", "靶器官毒性-").replace("单次", "").replace("反复", "")
+                if _key_normalized in hazard or key in hazard:
                     if desc not in symptom_lines:
                         symptom_lines.append(desc)
                     break

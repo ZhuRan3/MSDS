@@ -567,6 +567,29 @@ class EvidenceRetriever:
         filled = sum(1 for f in required if pool.evidences.get(f))
         return filled / len(required) if required else 0.0
 
+    def get_quality_coverage(self, pool: FactPool, min_confidence: float = 0.7) -> float:
+        """计算高质量数据覆盖率（仅统计置信度 >= min_confidence 的字段）"""
+        required = [
+            "cas_number", "chemical_name_cn", "molecular_formula",
+            "molecular_weight", "ghs_classifications", "flash_point",
+            "boiling_point", "ld50_oral", "un_number",
+            "density", "melting_point", "autoignition_temp",
+        ]
+        filled = 0
+        for f in required:
+            evs = pool.evidences.get(f, [])
+            if any(ev.confidence >= min_confidence for ev in evs):
+                filled += 1
+        return filled / len(required) if required else 0.0
+
+    def get_low_confidence_fields(self, pool: FactPool, threshold: float = 0.7) -> List[str]:
+        """获取低置信度字段列表"""
+        low = []
+        for field_name, evs in pool.evidences.items():
+            if evs and evs[0].confidence < threshold:
+                low.append(f"{field_name}(conf={evs[0].confidence:.1f},src={evs[0].source})")
+        return low
+
 
 # ============================================================
 # CLI
