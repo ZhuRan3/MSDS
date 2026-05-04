@@ -297,20 +297,20 @@
       "heavy_metal"
     ],
     "handling": [
+      "oxidizer",
       "corrosive_alkali",
       "corrosive_acid",
       "toxic",
       "compressed_gas",
-      "oxidizer",
       "flammable_liquid",
       "general"
     ],
     "disposal": [
       "heavy_metal",
+      "oxidizer",
       "corrosive_alkali",
       "corrosive_acid",
       "toxic",
-      "oxidizer",
       "compressed_gas",
       "flammable_liquid",
       "flammable_solid",

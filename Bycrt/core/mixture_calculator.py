@@ -337,6 +337,9 @@ class MixtureCalculator:
             threshold_key = route
         thresholds = ACUTE_TOXITY_THRESHOLDS.get(threshold_key, [])
         for threshold, cat in thresholds:
+            # FIX-Cat5: GHS Cat5为自愿分类，不出现在正式SDS中
+            if cat == 5:
+                continue
             if ate <= threshold:
                 table = ACUTE_TOXITY_CONVERSION.get(threshold_key, {})
                 info = table.get(cat, {})
@@ -362,7 +365,7 @@ class MixtureCalculator:
                     "classification_confidence": round(confidence, 2),
                     "classification_basis": basis,
                 }
-        # ATE > 5000，不分类
+        # ATE > 5000 或 Cat5（自愿分类），不分类
         return None
 
     def check_skin_corrosion(self) -> List[Dict]:
