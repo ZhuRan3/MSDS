@@ -17,7 +17,7 @@
     "density": "0.79（水=1）",
     "autoignition_temp": "465℃",
     "explosion_limits": "2.5%~13.0%（体积分数）",
-    "vapor_pressure": "229",
+    "vapor_pressure": "229 mmHg (25°C)",
     "vapor_density": "2.02（空气=1）",
     "evaporation_rate": "2.0",
     "viscosity": "0.32",
@@ -27,7 +27,7 @@
     "ghs_classifications": [
       "易燃液体，类别2",
       "严重眼损伤/眼刺激，类别2A",
-      "特异性靶器官毒性-一次接触（麻醉效应），类别3"
+      "特异性靶器官毒性-单次接触（麻醉效应），类别3"
     ],
     "pictograms": [
       "火焰",
@@ -179,7 +179,7 @@
     "density": "0.79（水=1）",
     "autoignition_temp": "363℃",
     "explosion_limits": "3.3%~19.0%（体积分数）",
-    "vapor_pressure": "59",
+    "vapor_pressure": "59 mmHg (25°C)",
     "vapor_density": "1.60（空气=1）",
     "evaporation_rate": "1.4",
     "viscosity": "1.2",
@@ -189,7 +189,7 @@
     "ghs_classifications": [
       "易燃液体，类别2",
       "严重眼损伤/眼刺激，类别2A",
-      "特异性靶器官毒性-一次接触（麻醉效应），类别3"
+      "特异性靶器官毒性-单次接触（麻醉效应），类别3"
     ],
     "pictograms": [
       "火焰",
@@ -340,7 +340,7 @@
     "density": "0.79（水=1）",
     "autoignition_temp": "524℃",
     "explosion_limits": "3.0%~16.0%（体积分数）",
-    "vapor_pressure": "73",
+    "vapor_pressure": "73 mmHg (20°C)",
     "vapor_density": "1.43（空气=1）",
     "evaporation_rate": "2.1",
     "viscosity": "0.37",
@@ -502,7 +502,7 @@
     "density": "0.66（水=1）",
     "autoignition_temp": "234℃",
     "explosion_limits": "1.1%~7.5%（体积分数）",
-    "vapor_pressure": "124",
+    "vapor_pressure": "124 mmHg",
     "vapor_density": "2.99（空气=1）",
     "evaporation_rate": "2.8",
     "viscosity": "0.31",
@@ -513,7 +513,7 @@
       "易燃液体，类别2",
       "皮肤腐蚀/刺激，类别2",
       "生殖毒性，类别2",
-      "特异性靶器官毒性-一次接触（麻醉效应），类别3",
+      "特异性靶器官毒性-单次接触（麻醉效应），类别3",
       "特异性靶器官毒性-反复接触，类别2",
       "危害水生环境-急性，类别2"
     ],
@@ -820,36 +820,47 @@
   },
   "118-96-7": {
     "chemical_name_cn": "三硝基甲苯",
-    "chemical_name_en": "",
+    "chemical_name_en": "2,4,6-trinitrotoluene",
     "synonyms": [],
     "molecular_formula": "C7H5N3O6",
     "molecular_weight": "227.13",
     "cas_number": "118-96-7",
     "ec_number": "",
-    "un_number": "",
-    "flash_point": "",
-    "boiling_point": "",
-    "melting_point": "",
-    "density": "",
-    "autoignition_temp": "",
-    "explosion_limits": "",
-    "vapor_pressure": "",
+    "un_number": "UN 0209",
+    "flash_point": "不可燃（但受热可爆炸）",
+    "boiling_point": "240 °C（分解，有爆炸风险）",
+    "melting_point": "80.1 °C",
+    "density": "1.654 g/cm³",
+    "autoignition_temp": "约300 °C",
+    "explosion_limits": "不适用（爆炸物）",
+    "vapor_pressure": "0.006 kPa (20°C)",
     "vapor_density": "",
     "evaporation_rate": "",
     "viscosity": "",
     "solubility_details": "",
     "partition_coefficient_n-octanol_water": 1.6,
     "partition_coefficient_log_kow": 1.6,
-    "ghs_classifications": [],
-    "pictograms": [],
-    "signal_word": "",
+    "ghs_classifications": [
+      "爆炸物，类别1.1",
+      "急性毒性-经口，类别3",
+      "特异性靶器官毒性-反复接触，类别2（血液、肝脏）",
+      "危害水生环境-急性危害，类别1",
+      "危害水生环境-长期危害，类别1"
+    ],
+    "pictograms": [
+      "GHS01",
+      "GHS06",
+      "GHS08",
+      "GHS09"
+    ],
+    "signal_word": "危险",
     "hazard_statements": [],
     "hazard_codes_full": [],
     "precautionary_codes_full": {},
-    "ld50_oral": "",
-    "ld50_dermal": "",
-    "lc50_inhalation": "",
-    "carcinogenicity_iarc": "",
+    "ld50_oral": "795 mg/kg (大鼠)",
+    "ld50_dermal": "不适用（皮肤吸收有限）",
+    "lc50_inhalation": "不适用（低蒸气压）",
+    "carcinogenicity_iarc": "3类（对人类致癌性无法分类）",
     "reproductive_toxicity_category": "",
     "pc_twa": "",
     "pc_stel": "",
@@ -861,14 +872,19 @@
     "iupac_name": "2-methyl-1,3,5-trinitrobenzene",
     "canonical_smiles": "",
     "xlogp": 1.6,
-    "chemical_family": "硝基芳香烃",
+    "chemical_family": "硝基芳香化合物",
     "data_source": "PubChem",
     "fetch_date": "2026-04-20",
-    "completeness": "partial"
+    "completeness": "partial",
+    "solubility": "微溶于水（0.013 g/100 mL, 20°C）",
+    "appearance": "浅黄色结晶固体",
+    "odor": "无味",
+    "skin_corrosion_category": "不适用",
+    "eye_damage_category": "不适用"
   },
   "106-44-5": {
     "chemical_name_cn": "对甲基苯酚",
-    "chemical_name_en": "",
+    "chemical_name_en": "4-methylphenol",
     "synonyms": [],
     "molecular_formula": "C7H8O",
     "molecular_weight": "108.14",
@@ -891,7 +907,7 @@
     "ghs_classifications": [
       "皮肤腐蚀/刺激，类别2",
       "严重眼损伤/眼刺激，类别1",
-      "特异性靶器官毒性-一次接触，类别3"
+      "特异性靶器官毒性-单次接触，类别3"
     ],
     "pictograms": [
       "火焰",
@@ -932,7 +948,7 @@
   },
   "108-95-2": {
     "chemical_name_cn": "苯酚",
-    "chemical_name_en": "",
+    "chemical_name_en": "phenol",
     "molecular_formula": "C6H6O",
     "molecular_weight": "94.11",
     "cas_number": "108-95-2",
@@ -942,15 +958,15 @@
     "chemical_family": "酚类",
     "un_number": "UN1671（固态苯酚）；UN2312（熔融态苯酚）",
     "ghs_classifications": [
-      "急性毒性-经口（类别3）",
-      "皮肤腐蚀/刺激（类别1B）",
-      "严重眼损伤/眼刺激（类别1）",
-      "生殖细胞致突变性（类别2）",
-      "生殖毒性（类别2）",
-      "特异性靶器官毒性-单次接触（类别3，呼吸道刺激）",
-      "特异性靶器官毒性-反复接触（类别2）",
-      "危害水生环境-急性危害（类别2）",
-      "危害水生环境-长期危害（类别2）"
+      "急性毒性-经口，类别3",
+      "皮肤腐蚀/刺激，类别1B",
+      "严重眼损伤/眼刺激，类别1",
+      "生殖细胞致突变，类别2",
+      "生殖毒性，类别2",
+      "特异性靶器官毒性-单次接触（，类别3，呼吸道刺激）",
+      "特异性靶器官毒性-反复接触，类别2",
+      "危害水生环境-急性危害，类别2",
+      "危害水生环境-长期危害，类别2"
     ],
     "pictograms": [
       "GHS06（骷髅和交叉骨）",
@@ -976,7 +992,7 @@
   },
   "58-92-2": {
     "chemical_name_cn": "对甲基氨基酚",
-    "chemical_name_en": "",
+    "chemical_name_en": "4-(methylamino)phenol",
     "molecular_formula": "C7H9NO",
     "molecular_weight": "123.15",
     "cas_number": "58-92-2",
@@ -1014,7 +1030,7 @@
   },
   "67-56-1": {
     "chemical_name_cn": "甲醇",
-    "chemical_name_en": "",
+    "chemical_name_en": "methanol",
     "molecular_formula": "CH4O",
     "molecular_weight": "32.042",
     "cas_number": "67-56-1",
@@ -1053,7 +1069,7 @@
   },
   "71-23-8": {
     "chemical_name_cn": "正丙醇",
-    "chemical_name_en": "",
+    "chemical_name_en": "propan-1-ol",
     "molecular_formula": "C3H8O",
     "molecular_weight": "60.10",
     "cas_number": "71-23-8",
@@ -1089,7 +1105,7 @@
   },
   "67-63-0": {
     "chemical_name_cn": "异丙醇",
-    "chemical_name_en": "",
+    "chemical_name_en": "propan-2-ol",
     "molecular_formula": "C3H8O",
     "molecular_weight": "60.10",
     "cas_number": "67-63-0",
@@ -1126,7 +1142,7 @@
   },
   "71-36-3": {
     "chemical_name_cn": "正丁醇",
-    "chemical_name_en": "",
+    "chemical_name_en": "butan-1-ol",
     "molecular_formula": "C4H10O",
     "molecular_weight": "74.12",
     "cas_number": "71-36-3",
@@ -1173,7 +1189,7 @@
   },
   "78-93-3": {
     "chemical_name_cn": "丁酮",
-    "chemical_name_en": "",
+    "chemical_name_en": "butan-2-one",
     "molecular_formula": "C4H8O",
     "molecular_weight": "72.11",
     "cas_number": "78-93-3",
@@ -1209,7 +1225,7 @@
   },
   "71-43-2": {
     "chemical_name_cn": "苯",
-    "chemical_name_en": "",
+    "chemical_name_en": "benzene",
     "molecular_formula": "C6H6",
     "molecular_weight": "78.11",
     "cas_number": "71-43-2",
@@ -1222,7 +1238,7 @@
       "易燃液体，类别 2",
       "皮肤腐蚀/刺激，类别 2",
       "严重眼损伤/眼刺激，类别 2",
-      "生殖细胞致突变性，类别 1B",
+      "生殖细胞致突变，类别 1B",
       "致癌性，类别 1A",
       "特异性靶器官毒性-反复接触，类别 1 (血液系统)",
       "吸入危害，类别 1"
@@ -1261,7 +1277,7 @@
   },
   "108-88-3": {
     "chemical_name_cn": "甲苯",
-    "chemical_name_en": "",
+    "chemical_name_en": "toluene",
     "molecular_formula": "C7H8",
     "molecular_weight": "92.14",
     "cas_number": "108-88-3",
@@ -1271,12 +1287,12 @@
     "chemical_family": "芳香烃",
     "un_number": "1294",
     "ghs_classifications": [
-      "易燃液体 - 类别 2",
-      "皮肤腐蚀/刺激 - 类别 2",
-      "特异性靶器官毒性-反复接触 - 类别 2 (麻醉作用)",
-      "生殖毒性 - 类别 2",
-      "吸入危险 - 类别 1",
-      "对水生环境长期有害 - 类别 2"
+      "易燃液体，类别2",
+      "皮肤腐蚀/刺激，类别2",
+      "特异性靶器官毒性-反复接触，类别2 (麻醉作用)",
+      "生殖毒性，类别2",
+      "吸入危害，类别1",
+      "对水生环境长期有害，类别2"
     ],
     "pictograms": [
       "GHS02 (火焰)",
@@ -1312,7 +1328,7 @@
   },
   "100-41-4": {
     "chemical_name_cn": "乙苯",
-    "chemical_name_en": "",
+    "chemical_name_en": "ethylbenzene",
     "molecular_formula": "C8H10",
     "molecular_weight": "106.16",
     "cas_number": "100-41-4",
@@ -1347,7 +1363,7 @@
   },
   "106-42-3": {
     "chemical_name_cn": "对二甲苯",
-    "chemical_name_en": "",
+    "chemical_name_en": "1,4-xylene",
     "molecular_formula": "C8H10",
     "molecular_weight": "106.16",
     "cas_number": "106-42-3",
@@ -1357,11 +1373,11 @@
     "chemical_family": "芳香烃",
     "un_number": "1307",
     "ghs_classifications": [
-      "易燃液体 类别3",
-      "皮肤腐蚀/刺激 类别2",
-      "特异性靶器官毒性-反复接触 类别3 (麻醉效应)",
-      "吸入危险 类别1",
-      "对水生环境危害-急性 类别2"
+      "易燃液体 ，类别3",
+      "皮肤腐蚀/刺激 ，类别2",
+      "特异性靶器官毒性-反复接触 ，类别3 (麻醉效应)",
+      "吸入危害 ，类别1",
+      "对水生环境危害-急性 ，类别2"
     ],
     "pictograms": [
       "GHS02",
@@ -1396,7 +1412,7 @@
   },
   "79-20-9": {
     "chemical_name_cn": "乙酸甲酯",
-    "chemical_name_en": "",
+    "chemical_name_en": "methyl acetate",
     "molecular_formula": "C3H6O2",
     "molecular_weight": "74.08",
     "cas_number": "79-20-9",
@@ -1431,7 +1447,7 @@
   },
   "141-78-6": {
     "chemical_name_cn": "乙酸乙酯",
-    "chemical_name_en": "",
+    "chemical_name_en": "ethyl acetate",
     "molecular_formula": "C4H8O2",
     "molecular_weight": "88.11",
     "cas_number": "141-78-6",
@@ -1467,7 +1483,7 @@
   },
   "108-21-4": {
     "chemical_name_cn": "乙酸异丙酯",
-    "chemical_name_en": "",
+    "chemical_name_en": "propan-2-yl acetate",
     "molecular_formula": "C5H10O2",
     "molecular_weight": "102.13",
     "cas_number": "108-21-4",
@@ -1503,7 +1519,7 @@
   },
   "123-86-4": {
     "chemical_name_cn": "乙酸正丁酯",
-    "chemical_name_en": "",
+    "chemical_name_en": "butyl acetate",
     "molecular_formula": "C6H12O2",
     "molecular_weight": "116.16",
     "cas_number": "123-86-4",
@@ -1513,8 +1529,8 @@
     "chemical_family": "酯类",
     "un_number": "1123",
     "ghs_classifications": [
-      "易燃液体 类别3",
-      "特异性靶器官毒性-单次接触 类别3（麻醉效应）"
+      "易燃液体 ，类别3",
+      "特异性靶器官毒性-单次接触 ，类别3（麻醉效应）"
     ],
     "pictograms": [
       "GHS02: 火焰",
@@ -1538,7 +1554,7 @@
   },
   "107-31-3": {
     "chemical_name_cn": "甲酸甲酯",
-    "chemical_name_en": "",
+    "chemical_name_en": "methyl formate",
     "molecular_formula": "C2H4O2",
     "molecular_weight": "60.05",
     "cas_number": "107-31-3",
@@ -1576,7 +1592,7 @@
   },
   "64-18-6": {
     "chemical_name_cn": "甲酸",
-    "chemical_name_en": "",
+    "chemical_name_en": "formic acid",
     "molecular_formula": "CH2O2",
     "molecular_weight": "46.025",
     "cas_number": "64-18-6",
@@ -1586,9 +1602,9 @@
     "chemical_family": "羧酸",
     "un_number": "1779",
     "ghs_classifications": [
-      "皮肤腐蚀/刺激, 类别1",
-      "严重眼损伤/眼刺激, 类别1",
-      "特定目标器官毒性-单次接触, 类别3 (呼吸道刺激)"
+      "皮肤腐蚀/刺激，类别1",
+      "严重眼损伤/眼刺激，类别1",
+      "特定目标器官毒性-单次接触，类别3 (呼吸道刺激)"
     ],
     "pictograms": [
       "GHS05 (腐蚀)",
@@ -1612,7 +1628,7 @@
   },
   "64-19-7": {
     "chemical_name_cn": "乙酸",
-    "chemical_name_en": "",
+    "chemical_name_en": "acetic acid",
     "molecular_formula": "C2H4O2",
     "molecular_weight": "60.05",
     "cas_number": "64-19-7",
@@ -1622,9 +1638,9 @@
     "chemical_family": "羧酸类",
     "un_number": "2789",
     "ghs_classifications": [
-      "易燃液体 类别3",
-      "皮肤腐蚀/刺激 类别1A",
-      "严重眼损伤/眼刺激 类别1"
+      "易燃液体 ，类别3",
+      "皮肤腐蚀/刺激 ，类别1A",
+      "严重眼损伤/眼刺激 ，类别1"
     ],
     "pictograms": [
       "GHS02: 火焰",
@@ -1648,7 +1664,7 @@
   },
   "79-21-0": {
     "chemical_name_cn": "过乙酸",
-    "chemical_name_en": "",
+    "chemical_name_en": "ethaneperoxoic acid",
     "molecular_formula": "C2H4O3",
     "molecular_weight": "76.05",
     "cas_number": "79-21-0",
@@ -1659,12 +1675,12 @@
     "un_number": "2131",
     "ghs_classifications": [
       "有机过氧化物, A型",
-      "急性毒性-经口, 类别3",
-      "急性毒性-经皮, 类别3",
-      "急性毒性-吸入, 类别3",
-      "皮肤腐蚀/刺激, 类别1",
-      "严重眼损伤/眼刺激, 类别1",
-      "特异性靶器官毒性-一次接触, 类别3 (呼吸道刺激)"
+      "急性毒性-经口，类别3",
+      "急性毒性-经皮，类别3",
+      "急性毒性-吸入，类别3",
+      "皮肤腐蚀/刺激，类别1",
+      "严重眼损伤/眼刺激，类别1",
+      "特异性靶器官毒性-单次接触，类别3 (呼吸道刺激)"
     ],
     "pictograms": [
       "GHS01: 爆炸炸弹",
@@ -1689,7 +1705,7 @@
   },
   "7664-38-2": {
     "chemical_name_cn": "磷酸",
-    "chemical_name_en": "",
+    "chemical_name_en": "phosphoric acid",
     "molecular_formula": "H3O4P",
     "molecular_weight": "97.995",
     "cas_number": "7664-38-2",
@@ -1699,8 +1715,8 @@
     "chemical_family": "无机酸",
     "un_number": "1805",
     "ghs_classifications": [
-      "皮肤腐蚀/刺激, 类别1A",
-      "严重眼损伤/眼刺激, 类别1"
+      "皮肤腐蚀/刺激，类别1A",
+      "严重眼损伤/眼刺激，类别1"
     ],
     "pictograms": [
       "腐蚀",
@@ -1734,10 +1750,10 @@
     "chemical_family": "无机强酸",
     "un_number": "1830",
     "ghs_classifications": [
-      "皮肤腐蚀/刺激, 类别1A",
-      "严重眼损伤/眼刺激, 类别1",
-      "特异性靶器官毒性-一次接触, 类别1 (呼吸道)",
-      "对水生环境有害-急性危害, 类别3"
+      "皮肤腐蚀/刺激，类别1A",
+      "严重眼损伤/眼刺激，类别1",
+      "特异性靶器官毒性-单次接触，类别1 (呼吸道)",
+      "危害水生环境-急性危害，类别3"
     ],
     "pictograms": [
       "GHS05 (腐蚀)",
@@ -1774,7 +1790,7 @@
   },
   "7722-84-1": {
     "chemical_name_cn": "过氧化氢",
-    "chemical_name_en": "",
+    "chemical_name_en": "hydrogen peroxide",
     "molecular_formula": "H2O2",
     "molecular_weight": "34.015",
     "cas_number": "7722-84-1",
@@ -1787,7 +1803,7 @@
       "氧化性液体，类别1",
       "皮肤腐蚀/刺激，类别1A",
       "严重眼损伤/眼刺激，类别1",
-      "特异性靶器官毒性-一次接触（呼吸道刺激），类别3"
+      "特异性靶器官毒性-单次接触（呼吸道刺激），类别3"
     ],
     "pictograms": [
       "GHS01: 爆炸物",
@@ -1813,7 +1829,7 @@
   },
   "7681-52-9": {
     "chemical_name_cn": "次氯酸钠",
-    "chemical_name_en": "",
+    "chemical_name_en": "sodium hypochlorite",
     "molecular_formula": "ClNaO",
     "molecular_weight": "74.44",
     "cas_number": "7681-52-9",
@@ -1823,13 +1839,15 @@
     "chemical_family": "无机次氯酸盐",
     "un_number": "1791",
     "ghs_classifications": [
-      "皮肤腐蚀/刺激, 类别1B",
-      "严重眼损伤/眼刺激, 类别1",
-      "危害水生环境-急性危害, 类别1",
-      "危害水生环境-长期危害, 类别1",
-      "特异性靶器官毒性-一次接触 (呼吸道刺激), 类别3"
+      "皮肤腐蚀/刺激，类别1B",
+      "严重眼损伤/眼刺激，类别1",
+      "危害水生环境-急性危害，类别1",
+      "危害水生环境-长期危害，类别1",
+      "特异性靶器官毒性-单次接触 (呼吸道刺激)，类别3",
+      "氧化性液体，类别2"
     ],
     "pictograms": [
+      "GHS03 (火焰上圆圈)",
       "GHS05 (腐蚀)",
       "GHS07 (感叹号)",
       "GHS09 (环境)"
@@ -1852,7 +1870,7 @@
   },
   "121-44-8": {
     "chemical_name_cn": "三乙胺",
-    "chemical_name_en": "",
+    "chemical_name_en": "N,N-diethylethanamine",
     "molecular_formula": "C6H15N",
     "molecular_weight": "101.19",
     "cas_number": "121-44-8",
@@ -1890,7 +1908,7 @@
   },
   "62-53-3": {
     "chemical_name_cn": "苯胺",
-    "chemical_name_en": "",
+    "chemical_name_en": "aniline",
     "molecular_formula": "C6H7N",
     "molecular_weight": "93.13",
     "cas_number": "62-53-3",
@@ -1900,14 +1918,14 @@
     "chemical_family": "芳香胺类",
     "un_number": "1547",
     "ghs_classifications": [
-      "急性毒性-经口, 类别3",
-      "急性毒性-经皮, 类别3",
-      "急性毒性-吸入, 类别3",
-      "皮肤腐蚀/刺激, 类别2",
-      "严重眼损伤/眼刺激, 类别2A",
-      "特异性靶器官毒性-反复接触, 类别1 (血液系统)",
-      "危害水生环境-急性危害, 类别1",
-      "危害水生环境-长期危害, 类别2"
+      "急性毒性-经口，类别3",
+      "急性毒性-经皮，类别3",
+      "急性毒性-吸入，类别3",
+      "皮肤腐蚀/刺激，类别2",
+      "严重眼损伤/眼刺激，类别2A",
+      "特异性靶器官毒性-反复接触，类别1 (血液系统)",
+      "危害水生环境-急性危害，类别1",
+      "危害水生环境-长期危害，类别2"
     ],
     "pictograms": [
       "GHS06 (骷髅和交叉骨)",
@@ -1933,7 +1951,7 @@
   },
   "74-89-5": {
     "chemical_name_cn": "甲胺",
-    "chemical_name_en": "",
+    "chemical_name_en": "methanamine",
     "molecular_formula": "CH5N",
     "molecular_weight": "31.057",
     "cas_number": "74-89-5",
@@ -1943,11 +1961,11 @@
     "chemical_family": "脂肪胺类",
     "un_number": "1061",
     "ghs_classifications": [
-      "易燃气体 (类别1)",
+      "易燃气体 ，类别1",
       "高压气体 (液化气体)",
-      "皮肤腐蚀/刺激 (类别1)",
-      "严重眼损伤/眼刺激 (类别1)",
-      "特异性靶器官毒性-一次接触 (类别3，呼吸道刺激)"
+      "皮肤腐蚀/刺激 ，类别1",
+      "严重眼损伤/眼刺激 ，类别1",
+      "特异性靶器官毒性-单次接触 (，类别3，呼吸道刺激)"
     ],
     "pictograms": [
       "GHS02 (火焰)",
@@ -1973,7 +1991,7 @@
   },
   "75-09-2": {
     "chemical_name_cn": "二氯甲烷",
-    "chemical_name_en": "",
+    "chemical_name_en": "dichloromethane",
     "molecular_formula": "CH2Cl2",
     "molecular_weight": "84.93",
     "cas_number": "75-09-2",
@@ -1983,10 +2001,10 @@
     "chemical_family": "卤代烃类",
     "un_number": "1593",
     "ghs_classifications": [
-      "皮肤刺激 (类别 2)",
-      "眼刺激 (类别 2A)",
-      "特异性靶器官毒性-反复接触 (类别 2, 肝脏，血液)",
-      "致癌性 (类别 2)"
+      "皮肤刺激 ，类别2",
+      "眼刺激 ，类别2A",
+      "特异性靶器官毒性-反复接触 (，类别 2, 肝脏，血液)",
+      "致癌性 ，类别2"
     ],
     "pictograms": [
       "感叹号",
@@ -2020,7 +2038,7 @@
   },
   "67-66-3": {
     "chemical_name_cn": "三氯甲烷",
-    "chemical_name_en": "",
+    "chemical_name_en": "chloroform",
     "molecular_formula": "CHCl3",
     "molecular_weight": "119.37",
     "cas_number": "67-66-3",
@@ -2030,14 +2048,14 @@
     "chemical_family": "卤代烃/卤代烷烃",
     "un_number": "1888",
     "ghs_classifications": [
-      "急性毒性-经口, 类别4",
-      "急性毒性-吸入, 类别3",
-      "皮肤腐蚀/刺激, 类别2",
-      "严重眼损伤/眼刺激, 类别2A",
-      "特异性靶器官毒性-反复接触, 类别1 (肝脏, 肾脏)",
-      "生殖毒性, 类别2",
-      "致癌性, 类别2",
-      "特异性靶器官毒性-单次接触, 类别3 (麻醉效应)"
+      "急性毒性-经口，类别4",
+      "急性毒性-吸入，类别3",
+      "皮肤腐蚀/刺激，类别2",
+      "严重眼损伤/眼刺激，类别2A",
+      "特异性靶器官毒性-反复接触，类别1 (肝脏, 肾脏)",
+      "生殖毒性，类别2",
+      "致癌性，类别2",
+      "特异性靶器官毒性-单次接触，类别3 (麻醉效应)"
     ],
     "pictograms": [
       "GHS06 (骷髅和交叉骨)",
@@ -2062,7 +2080,7 @@
   },
   "56-23-5": {
     "chemical_name_cn": "四氯化碳",
-    "chemical_name_en": "",
+    "chemical_name_en": "tetrachloromethane",
     "molecular_formula": "CCl4",
     "molecular_weight": "153.8",
     "cas_number": "56-23-5",
@@ -2072,15 +2090,15 @@
     "chemical_family": "卤代烷烃",
     "un_number": "1846",
     "ghs_classifications": [
-      "急性毒性-经口 类别3",
-      "急性毒性-经皮 类别3",
-      "急性毒性-吸入 类别3",
-      "皮肤腐蚀/刺激 类别2",
-      "严重眼损伤/眼刺激 类别2A",
-      "特异性靶器官毒性-反复接触 类别1 (肝脏，肾脏)",
-      "致癌性 类别2",
-      "对水生环境危害-急性 类别3",
-      "对水生环境危害-慢性 类别3"
+      "急性毒性-经口 ，类别3",
+      "急性毒性-经皮 ，类别3",
+      "急性毒性-吸入 ，类别3",
+      "皮肤腐蚀/刺激 ，类别2",
+      "严重眼损伤/眼刺激 ，类别2A",
+      "特异性靶器官毒性-反复接触 ，类别1 (肝脏，肾脏)",
+      "致癌性 ，类别2",
+      "对水生环境危害-急性 ，类别3",
+      "对水生环境危害-慢性 ，类别3"
     ],
     "pictograms": [
       "GHS06 (骷髅和交叉骨)",
@@ -2105,7 +2123,7 @@
   },
   "127-18-4": {
     "chemical_name_cn": "四氯乙烯",
-    "chemical_name_en": "",
+    "chemical_name_en": "1,1,2,2-tetrachloroethene",
     "molecular_formula": "C2Cl4",
     "molecular_weight": "165.8",
     "cas_number": "127-18-4",
@@ -2115,12 +2133,12 @@
     "chemical_family": "卤代烯烃类",
     "un_number": "1897",
     "ghs_classifications": [
-      "皮肤刺激 (类别 2)",
-      "眼刺激 (类别 2A)",
-      "特异性靶器官毒性-反复接触 (类别 1) (中枢神经系统, 肝脏, 肾脏)",
-      "致癌性 (类别 2)",
-      "危害水生环境-急性危害 (类别 1)",
-      "危害水生环境-长期危害 (类别 1)"
+      "皮肤刺激 ，类别2",
+      "眼刺激 ，类别2A",
+      "特异性靶器官毒性-反复接触 ，类别1 (中枢神经系统, 肝脏, 肾脏)",
+      "致癌性 ，类别2",
+      "危害水生环境-急性危害 ，类别1",
+      "危害水生环境-长期危害 ，类别1"
     ],
     "pictograms": [
       "感叹号",
@@ -2144,8 +2162,8 @@
     "Koc土壤迁移系数": "约 200 (Log Koc ~ 2.3)"
   },
   "71-55-6": {
-    "chemical_name_cn": "1",
-    "chemical_name_en": "",
+    "chemical_name_cn": "1,1,1-三氯乙烷",
+    "chemical_name_en": "1,1,1-trichloroethane",
     "molecular_formula": "C2H3Cl3",
     "molecular_weight": "133.40",
     "cas_number": "71-55-6",
@@ -2156,12 +2174,12 @@
     "chemical_family": "卤代烷烃",
     "un_number": "2831",
     "ghs_classifications": [
-      "易燃液体 类别2",
-      "皮肤腐蚀/刺激 类别2",
-      "特异性靶器官毒性-单次接触 类别3 (麻醉效应)",
-      "特异性靶器官毒性-反复接触 类别2",
-      "对水生环境危害-急性 类别2",
-      "对水生环境危害-慢性 类别2"
+      "易燃液体 ，类别2",
+      "皮肤腐蚀/刺激 ，类别2",
+      "特异性靶器官毒性-单次接触 ，类别3 (麻醉效应)",
+      "特异性靶器官毒性-反复接触 ，类别2",
+      "对水生环境危害-急性 ，类别2",
+      "对水生环境危害-慢性 ，类别2"
     ],
     "pictograms": [
       "GHS02 (火焰)",
@@ -2185,8 +2203,8 @@
     "Koc土壤迁移系数": "约 100 - 150 (推断值，在土壤中具有中等至高迁移性)"
   },
   "107-06-2": {
-    "chemical_name_cn": "1",
-    "chemical_name_en": "",
+    "chemical_name_cn": "1,2-二氯乙烷",
+    "chemical_name_en": "1,2-dichloroethane",
     "molecular_formula": "C2H4Cl2",
     "molecular_weight": "98.96",
     "cas_number": "107-06-2",
@@ -2196,14 +2214,14 @@
     "chemical_family": "卤代烷烃类",
     "un_number": "1184",
     "ghs_classifications": [
-      "易燃液体, 类别3",
-      "急性毒性-经口, 类别4",
-      "急性毒性-吸入, 类别4",
-      "皮肤腐蚀/刺激, 类别2",
-      "严重眼损伤/眼刺激, 类别2A",
-      "致癌性, 类别2",
-      "特异性靶器官毒性-反复接触, 类别2 (肝脏、肾脏)",
-      "对水生环境有害-急性危害, 类别2"
+      "易燃液体，类别3",
+      "急性毒性-经口，类别4",
+      "急性毒性-吸入，类别4",
+      "皮肤腐蚀/刺激，类别2",
+      "严重眼损伤/眼刺激，类别2A",
+      "致癌性，类别2",
+      "特异性靶器官毒性-反复接触，类别2 (肝脏、肾脏)",
+      "危害水生环境-急性危害，类别2"
     ],
     "pictograms": [
       "GHS02 (火焰)",
@@ -2228,8 +2246,8 @@
     "Koc土壤迁移系数": "约 33 (具有高迁移性)"
   },
   "106-46-7": {
-    "chemical_name_cn": "1",
-    "chemical_name_en": "",
+    "chemical_name_cn": "1,4-二氯苯",
+    "chemical_name_en": "1,4-dichlorobenzene",
     "molecular_formula": "C6H4Cl2",
     "molecular_weight": "147.00",
     "cas_number": "106-46-7",
@@ -2239,13 +2257,13 @@
     "chemical_family": "卤代芳烃 (氯苯类)",
     "un_number": "3077",
     "ghs_classifications": [
-      "急性毒性-经口 类别4",
-      "皮肤腐蚀/刺激 类别2",
-      "严重眼损伤/眼刺激 类别2A",
-      "特异性靶器官毒性-反复接触 类别1 (肝脏, 肾脏)",
-      "致癌性 类别2",
-      "危害水生环境-急性危害 类别1",
-      "危害水生环境-长期危害 类别1"
+      "急性毒性-经口 ，类别4",
+      "皮肤腐蚀/刺激 ，类别2",
+      "严重眼损伤/眼刺激 ，类别2A",
+      "特异性靶器官毒性-反复接触 ，类别1 (肝脏, 肾脏)",
+      "致癌性 ，类别2",
+      "危害水生环境-急性危害 ，类别1",
+      "危害水生环境-长期危害 ，类别1"
     ],
     "pictograms": [
       "GHS07 (感叹号)",
@@ -2270,7 +2288,7 @@
   },
   "56-81-5": {
     "chemical_name_cn": "丙三醇",
-    "chemical_name_en": "",
+    "chemical_name_en": "propane-1,2,3-triol",
     "molecular_formula": "C3H8O3",
     "molecular_weight": "92.09",
     "cas_number": "56-81-5",
@@ -2303,7 +2321,7 @@
   },
   "57-55-6": {
     "chemical_name_cn": "丙二醇",
-    "chemical_name_en": "",
+    "chemical_name_en": "propane-1,2-diol",
     "molecular_formula": "C3H8O2",
     "molecular_weight": "76.09",
     "cas_number": "57-55-6",
@@ -2313,7 +2331,7 @@
     "chemical_family": "醇类（二元醇）",
     "un_number": "无（非危险品）",
     "ghs_classifications": [
-      "特异性靶器官毒性-一次接触（麻醉作用）-类别3"
+      "特异性靶器官毒性-单次接触（麻醉作用），类别3"
     ],
     "pictograms": [],
     "signal_word": "无",
@@ -2342,7 +2360,7 @@
   },
   "111-76-2": {
     "chemical_name_cn": "乙二醇丁醚",
-    "chemical_name_en": "",
+    "chemical_name_en": "2-butoxyethanol",
     "molecular_formula": "C6H14O2",
     "molecular_weight": "118.17",
     "cas_number": "111-76-2",
@@ -2352,12 +2370,12 @@
     "chemical_family": "醇类",
     "un_number": "需实验测定",
     "ghs_classifications": [
-      "急性毒性-经口 类别4",
-      "急性毒性-经皮 类别4",
-      "急性毒性-吸入 类别4",
-      "皮肤腐蚀/刺激 类别2",
-      "严重眼损伤/眼刺激 类别2A",
-      "特异性靶器官毒性-反复接触 类别2 (血液系统)"
+      "急性毒性-经口 ，类别4",
+      "急性毒性-经皮 ，类别4",
+      "急性毒性-吸入 ，类别4",
+      "皮肤腐蚀/刺激 ，类别2",
+      "严重眼损伤/眼刺激 ，类别2A",
+      "特异性靶器官毒性-反复接触 ，类别2 (血液系统)"
     ],
     "pictograms": [
       "感叹号",
@@ -2381,7 +2399,7 @@
   },
   "107-21-1": {
     "chemical_name_cn": "乙二醇",
-    "chemical_name_en": "",
+    "chemical_name_en": "ethane-1,2-diol",
     "molecular_formula": "C2H6O2",
     "molecular_weight": "62.07",
     "cas_number": "107-21-1",
@@ -2391,8 +2409,8 @@
     "chemical_family": "醇类（二醇类）",
     "un_number": "非危险货物（UN编号不适用）",
     "ghs_classifications": [
-      "急性毒性-经口 类别4 (H302)",
-      "特异性靶器官毒性-反复接触 类别2 (肾脏) (H373)"
+      "急性毒性-经口 ，类别4 (H302)",
+      "特异性靶器官毒性-反复接触 ，类别2 (肾脏) (H373)"
     ],
     "pictograms": [
       "GHS07 (感叹号)",
@@ -2424,7 +2442,7 @@
   },
   "77-92-9": {
     "chemical_name_cn": "柠檬酸",
-    "chemical_name_en": "",
+    "chemical_name_en": "2-hydroxypropane-1,2,3-tricarboxylic acid",
     "molecular_formula": "C6H8O7",
     "molecular_weight": "192.12",
     "cas_number": "77-92-9",
@@ -2434,9 +2452,9 @@
     "chemical_family": "有机酸/羧酸类",
     "un_number": "无（非危险品）",
     "ghs_classifications": [
-      "皮肤腐蚀/刺激 类别2",
-      "严重眼损伤/眼刺激 类别2A",
-      "特异性靶器官毒性-单次接触 类别3 (呼吸道刺激)"
+      "皮肤腐蚀/刺激 ，类别2",
+      "严重眼损伤/眼刺激 ，类别2A",
+      "特异性靶器官毒性-单次接触 ，类别3 (呼吸道刺激)"
     ],
     "pictograms": [
       "感叹号"
@@ -2459,7 +2477,7 @@
   },
   "109-60-4": {
     "chemical_name_cn": "甲酸丙酯",
-    "chemical_name_en": "",
+    "chemical_name_en": "propyl acetate",
     "molecular_formula": "C5H10O2",
     "molecular_weight": "102.13",
     "cas_number": "109-60-4",
@@ -2495,7 +2513,7 @@
   },
   "109-99-9": {
     "chemical_name_cn": "四氢呋喃",
-    "chemical_name_en": "",
+    "chemical_name_en": "oxolane",
     "molecular_formula": "C4H8O",
     "molecular_weight": "72.11",
     "cas_number": "109-99-9",
@@ -2531,7 +2549,7 @@
   },
   "111-65-9": {
     "chemical_name_cn": "正辛烷",
-    "chemical_name_en": "",
+    "chemical_name_en": "octane",
     "molecular_formula": "C8H18",
     "molecular_weight": "114.23",
     "cas_number": "111-65-9",
@@ -2542,7 +2560,7 @@
     "un_number": "1262",
     "ghs_classifications": [
       "易燃液体，类别2",
-      "吸入危险，类别1",
+      "吸入危害，类别1",
       "特异性靶器官毒性-单次接触（麻醉效应），类别3（麻醉效应）",
       "对水生生物的危害（长期），类别2"
     ],
@@ -2569,7 +2587,7 @@
   },
   "124-18-5": {
     "chemical_name_cn": "正癸烷",
-    "chemical_name_en": "",
+    "chemical_name_en": "decane",
     "molecular_formula": "C10H22",
     "molecular_weight": "142.28",
     "cas_number": "124-18-5",
@@ -2579,11 +2597,11 @@
     "chemical_family": "烷烃",
     "un_number": "2247",
     "ghs_classifications": [
-      "易燃液体 - 类别 3",
-      "吸入危害 - 类别 1",
-      "特异性靶器官毒性（单次接触）- 麻醉作用 - 类别 3（麻醉效应）",
-      "危害水生环境 - 急性危害 - 类别 1",
-      "危害水生环境 - 长期危害 - 类别 1"
+      "易燃液体，类别3",
+      "吸入危害，类别1",
+      "特异性靶器官毒性（单次接触）- 麻醉作用，类别3（麻醉效应）",
+      "危害水生环境 - 急性危害，类别1",
+      "危害水生环境 - 长期危害，类别1"
     ],
     "pictograms": [
       "GHS02",
@@ -2609,7 +2627,7 @@
   },
   "91-20-3": {
     "chemical_name_cn": "萘",
-    "chemical_name_en": "",
+    "chemical_name_en": "naphthalene",
     "molecular_formula": "C10H8",
     "molecular_weight": "128.17",
     "cas_number": "91-20-3",
@@ -2619,14 +2637,14 @@
     "chemical_family": "多环芳烃",
     "un_number": "1334",
     "ghs_classifications": [
-      "急性毒性-经口 类别4",
-      "皮肤腐蚀/刺激 类别2",
-      "严重眼损伤/眼刺激 类别2A",
-      "特异性靶器官毒性-反复接触 类别1 (造血系统、神经系统)",
-      "致癌性 类别2",
-      "特异性靶器官毒性-单次接触 类别3 (麻醉效应)",
-      "危害水生环境-急性危害 类别1",
-      "危害水生环境-长期危害 类别1"
+      "急性毒性-经口 ，类别4",
+      "皮肤腐蚀/刺激 ，类别2",
+      "严重眼损伤/眼刺激 ，类别2A",
+      "特异性靶器官毒性-反复接触 ，类别1 (造血系统、神经系统)",
+      "致癌性 ，类别2",
+      "特异性靶器官毒性-单次接触 ，类别3 (麻醉效应)",
+      "危害水生环境-急性危害 ，类别1",
+      "危害水生环境-长期危害 ，类别1"
     ],
     "pictograms": [
       "GHS06",
@@ -2652,7 +2670,7 @@
   },
   "74-83-9": {
     "chemical_name_cn": "溴甲烷",
-    "chemical_name_en": "",
+    "chemical_name_en": "bromomethane",
     "molecular_formula": "CH3Br",
     "molecular_weight": "94.94",
     "cas_number": "74-83-9",
@@ -2662,17 +2680,17 @@
     "chemical_family": "烷基卤化物（卤代烷烃）",
     "un_number": "1062",
     "ghs_classifications": [
-      "易燃气体, 类别1",
-      "急性毒性-经口, 类别3",
-      "急性毒性-经皮, 类别3",
-      "急性毒性-吸入, 类别2",
-      "皮肤腐蚀/刺激, 类别2",
-      "严重眼损伤/眼刺激, 类别2A",
-      "特异性靶器官毒性-反复接触, 类别1 (神经系统)",
-      "生殖细胞致突变性, 类别2",
-      "致癌性, 类别2",
-      "特异性靶器官毒性-单次接触, 类别3 (麻醉效应)",
-      "危害臭氧层, 类别1"
+      "易燃气体，类别1",
+      "急性毒性-经口，类别3",
+      "急性毒性-经皮，类别3",
+      "急性毒性-吸入，类别2",
+      "皮肤腐蚀/刺激，类别2",
+      "严重眼损伤/眼刺激，类别2A",
+      "特异性靶器官毒性-反复接触，类别1 (神经系统)",
+      "生殖细胞致突变，类别2",
+      "致癌性，类别2",
+      "特异性靶器官毒性-单次接触，类别3 (麻醉效应)",
+      "危害臭氧层，类别1"
     ],
     "pictograms": [
       "GHS02 (火焰)",
@@ -2699,7 +2717,7 @@
   },
   "75-01-4": {
     "chemical_name_cn": "氯乙烯",
-    "chemical_name_en": "",
+    "chemical_name_en": "chloroethene",
     "molecular_formula": "C2H3Cl",
     "molecular_weight": "62.50",
     "cas_number": "75-01-4",
@@ -2709,11 +2727,11 @@
     "chemical_family": "卤代烯烃",
     "un_number": "1086",
     "ghs_classifications": [
-      "易燃气体, 类别1",
+      "易燃气体，类别1",
       "高压气体, 液化气体",
-      "致癌性, 类别1A",
-      "生殖细胞致突变性, 类别1B",
-      "特定目标器官毒性-反复接触, 类别1"
+      "致癌性，类别1A",
+      "生殖细胞致突变，类别1B",
+      "特定目标器官毒性-反复接触，类别1"
     ],
     "pictograms": [
       "GHS02",
@@ -2739,7 +2757,7 @@
   },
   "50-00-0": {
     "chemical_name_cn": "甲醛",
-    "chemical_name_en": "",
+    "chemical_name_en": "formaldehyde",
     "molecular_formula": "CH2O",
     "molecular_weight": "30.026",
     "cas_number": "50-00-0",
@@ -2814,7 +2832,7 @@
   },
   "108-90-7": {
     "chemical_name_cn": "氯苯",
-    "chemical_name_en": "",
+    "chemical_name_en": "chlorobenzene",
     "molecular_formula": "C6H5Cl",
     "molecular_weight": "112.55",
     "cas_number": "108-90-7",
@@ -2824,8 +2842,8 @@
     "chemical_family": "卤代芳烃",
     "un_number": "1134",
     "ghs_classifications": [
-      "易燃液体 类别3",
-      "特异性靶器官毒性-反复接触 类别2 (中枢神经系统, 肝脏, 肾脏)"
+      "易燃液体 ，类别3",
+      "特异性靶器官毒性-反复接触 ，类别2 (中枢神经系统, 肝脏, 肾脏)"
     ],
     "pictograms": [
       "GHS02",
@@ -2849,7 +2867,7 @@
   },
   "1333-74-0": {
     "chemical_name_cn": "氢气",
-    "chemical_name_en": "",
+    "chemical_name_en": "molecular hydrogen",
     "molecular_formula": "H2",
     "molecular_weight": "2.016",
     "cas_number": "1333-74-0",
@@ -2859,9 +2877,9 @@
     "chemical_family": "非金属单质",
     "un_number": "1049",
     "ghs_classifications": [
-      "易燃气体 (类别 1)",
+      "易燃气体 ，类别1",
       "高压气体 (压缩气体或冷冻液化气体)",
-      "特异性靶器官毒性-单次接触 (类别 3，麻醉效应)"
+      "特异性靶器官毒性-单次接触 (，类别 3，麻醉效应)"
     ],
     "pictograms": [
       "GHS02: 火焰",
@@ -2885,18 +2903,18 @@
   },
   "554-13-2": {
     "chemical_name_cn": "碳酸锂",
-    "chemical_name_en": "",
+    "chemical_name_en": "lithium carbonate",
     "molecular_formula": "CLi2O3",
     "molecular_weight": "73.9",
     "cas_number": "554-13-2",
-    "iupac_name": "dilithium;carbonate",
+    "iupac_name": "lithium carbonate",
     "xlogp": "",
     "data_source": "PubChem",
     "chemical_family": "无机碳酸盐",
     "un_number": "需实验测定",
     "ghs_classifications": [
-      "特异性靶器官毒性-反复接触 (类别2)",
-      "生殖毒性 (类别1B)"
+      "特异性靶器官毒性-反复接触 ，类别2",
+      "生殖毒性 ，类别1B"
     ],
     "pictograms": [
       "健康危害"
@@ -2919,7 +2937,7 @@
   },
   "7440-37-1": {
     "chemical_name_cn": "氩气",
-    "chemical_name_en": "",
+    "chemical_name_en": "argon",
     "molecular_formula": "Ar",
     "molecular_weight": "39.9",
     "cas_number": "7440-37-1",
@@ -2929,7 +2947,7 @@
     "chemical_family": "稀有气体",
     "un_number": "1006",
     "ghs_classifications": [
-      "加压气体 - 压缩气体"
+      "高压气体 - 压缩气体"
     ],
     "pictograms": [
       "GHS04 (气瓶)"
@@ -2991,7 +3009,7 @@
     "ghs_classifications": [
       "皮肤腐蚀/刺激，类别1B",
       "严重眼损伤/眼刺激，类别1",
-      "特异性靶器官毒性-一次接触，类别3（呼吸道刺激）"
+      "特异性靶器官毒性-单次接触，类别3（呼吸道刺激）"
     ],
     "pictograms": [
       "GHS05 (腐蚀性)",
@@ -3031,7 +3049,7 @@
     "reproductive_toxicity_category": "无分类",
     "stot_single_exposure": "呼吸道刺激",
     "stot_repeated_exposure": "无数据",
-    "pc_twa": "7.5",
+    "pc_twa": "",
     "pc_stel": "",
     "ecotoxicity_fish_lc50": "不适用",
     "persistence_degradability": "不适用（无机酸）",
@@ -3064,7 +3082,8 @@
       "chronic_effects": "",
       "eye_effects": "严重灼伤，可致永久性视力损伤。",
       "iarc_group": ""
-    }
+    },
+    "mac": "7.5"
   },
   "7440-50-8": {
     "chemical_name_cn": "铜",
@@ -3256,7 +3275,7 @@
   },
   "98-01-1": {
     "chemical_name_cn": "furan-2-carbaldehyde",
-    "chemical_name_en": "",
+    "chemical_name_en": "furan-2-carbaldehyde",
     "molecular_formula": "C5H4O2",
     "molecular_weight": "96.08",
     "cas_number": "98-01-1",
@@ -3298,46 +3317,36 @@
     "BCF生物富集系数": "< 10 (潜在生物富集性低)",
     "Koc土壤迁移系数": "约 25 (具有高迁移性)"
   },
-  "furfural": {
-    "chemical_name_cn": "糠醛",
-    "chemical_name_en": "",
-    "molecular_formula": "C5H4O2",
-    "molecular_weight": "96.08",
-    "cas_number": "furfural",
-    "iupac_name": "furan-2-carbaldehyde",
-    "xlogp": "0.4",
-    "data_source": "PubChem",
-    "ld50_oral": "约 65 mg/kg (大鼠)",
-    "lc50_inhalation": "约 0.8 mg/L (大鼠，4小时)",
-    "carcinogenicity_ghs": "Evaluation: There is inadequate evidence in humans for the carcinogenicity of furfural. There is limited evidence in experimental animals for the carcinogenicity of furfural. Overall evaluation: Furfural is not classifiable as to its carcinogenicity to humans (Group 3).",
-    "stot_target_organs": "Hepatic",
-    "chemical_family": "醛类（呋喃衍生物）",
-    "un_number": "UN 1199",
-    "ghs_classifications": [
-      "急性毒性-经口 类别3",
-      "急性毒性-经皮 类别3",
-      "急性毒性-吸入 类别3",
-      "皮肤腐蚀/刺激 类别2",
-      "严重眼损伤/眼刺激 类别2",
-      "特异性靶器官毒性-反复接触 类别2"
-    ],
-    "pictograms": [
-      "GHS06",
-      "GHS07",
-      "GHS08"
-    ],
-    "signal_word": "危险",
-    "flash_point": "60°C (闭杯)",
-    "boiling_point": "161.7°C",
-    "melting_point": "-36.5°C",
-    "density": "1.16 (水=1)",
-    "solubility": "微溶于水，易溶于乙醇、乙醚等多数有机溶剂",
-    "皮肤腐蚀类别": "皮肤刺激 类别2",
-    "眼损伤类别": "眼刺激 类别2",
-    "ld50_dermal": "约 150 mg/kg (兔)",
-    "IARC致癌分类": "2B类 (可能对人类致癌)",
-    "生物降解性": "易快速生物降解",
-    "BCF生物富集系数": "约 3.2 (潜在生物富集性低)",
-    "Koc土壤迁移系数": "约 24 (在土壤中具有高迁移性)"
+  "7732-18-5": {
+    "chemical_name_cn": "水",
+    "chemical_name_en": "water",
+    "molecular_formula": "H2O",
+    "molecular_weight": "18.015",
+    "cas_number": "7732-18-5",
+    "iupac_name": "oxidane",
+    "xlogp": "-0.6",
+    "data_source": "手动录入",
+    "chemical_family": "无机物",
+    "un_number": "不适用",
+    "ghs_classifications": [],
+    "pictograms": [],
+    "signal_word": "",
+    "flash_point": "不适用",
+    "boiling_point": "100 °C",
+    "melting_point": "0 °C",
+    "density": "1.00 g/cm³ (20°C)",
+    "solubility": "与多数极性溶剂互溶",
+    "vapor_pressure": "2.3 kPa (20°C)",
+    "appearance": "无色透明液体",
+    "odor": "无味",
+    "ph_value": "约7 (中性)",
+    "autoignition_temp": "不适用",
+    "explosion_limits": "不适用",
+    "partition_coefficient_n_octanol_water": "不适用",
+    "ld50_oral": "不适用",
+    "ld50_dermal": "不适用",
+    "lc50_inhalation": "不适用",
+    "skin_corrosion_category": "不适用",
+    "eye_damage_category": "不适用"
   }
 }

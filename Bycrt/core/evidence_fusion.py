@@ -392,7 +392,7 @@ class EvidenceRetriever:
                 ))
 
         # 职业接触限值
-        oel_fields = ["pc_twa", "pc_stel", "acgih_tlv_twa", "acgih_tlv_stel"]
+        oel_fields = ["pc_twa", "pc_stel", "mac", "acgih_tlv_twa", "acgih_tlv_stel"]
         for f in oel_fields:
             val = data.get(f)
             if val:

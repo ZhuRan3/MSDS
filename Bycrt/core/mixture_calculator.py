@@ -595,6 +595,67 @@ class MixtureCalculator:
             "classification_basis": {"method": "flash_point_based", "rule_reference": "UN GHS 2.6", "note": "缺少闪点数据"},
         }
 
+    def check_oxidizer(self) -> Optional[Dict]:
+        """检查氧化性（GB/T 30000.14 / UN GHS 2.13）"""
+        self.result.calculation_log.append(f"\n{'='*60}")
+        self.result.calculation_log.append("氧化性检查")
+        self.result.calculation_log.append(f"{'='*60}")
+
+        oxidizer_conc = 0.0
+        oxidizer_names = []
+
+        for c in self.components:
+            for cls_str in c.ghs_classifications:
+                if "氧化" in cls_str:
+                    oxidizer_conc += c.concentration
+                    oxidizer_names.append(c.name)
+                    self.result.calculation_log.append(
+                        f"  {c.name}({c.concentration}%): {cls_str}"
+                    )
+                    break
+
+        if oxidizer_conc < 1.0:
+            self.result.calculation_log.append(
+                f"  → 氧化性组分总浓度{oxidizer_conc:.1f}%<1%，不分类")
+            return None
+
+        # 确定氧化性类别（取最高类别组分）— 同时匹配中文"类别X"和英文"Cat X"
+        best_cat = 3  # 默认最低
+        for c in self.components:
+            for cls_str in c.ghs_classifications:
+                if "氧化" in cls_str:
+                    if "类别1" in cls_str or "Cat 1" in cls_str:
+                        best_cat = min(best_cat, 1)
+                    elif "类别2" in cls_str or "Cat 2" in cls_str:
+                        best_cat = min(best_cat, 2)
+                    elif "类别3" in cls_str or "Cat 3" in cls_str:
+                        best_cat = min(best_cat, 3)
+
+        cat_label = f"类别{best_cat}"
+        # GHS H码: Cat1→H271, Cat2→H272, Cat3→H272（GHS无H273）
+        h_code_map = {1: "H271", 2: "H272", 3: "H272"}
+        h_code = h_code_map[best_cat]
+        is_liquid = any("液体" in cls for c in self.components for cls in c.ghs_classifications if "氧化" in cls)
+        medium = "液体" if is_liquid else "固体"
+        classification = f"氧化性{medium}，{cat_label}"
+
+        self.result.calculation_log.append(
+            f"  → 氧化性组分总浓度{oxidizer_conc:.1f}%≥1%: {classification}")
+
+        return {
+            "hazard": classification,
+            "h_code": h_code,
+            "signal": "危险" if best_cat <= 2 else "警告",
+            "reason": f"氧化性组分总浓度{oxidizer_conc:.1f}%≥1%",
+            "classification_confidence": 0.85,
+            "classification_basis": {
+                "method": "oxidizer_concentration",
+                "rule_reference": "UN GHS 2.13",
+                "oxidizer_concentration": oxidizer_conc,
+                "oxidizer_components": oxidizer_names,
+            },
+        }
+
     def calculate_all(self) -> MixtureResult:
         """执行全部计算"""
         self.result.calculation_log.append("=" * 60)
@@ -647,16 +708,21 @@ class MixtureCalculator:
             self.result.classifications.append(flam_result)
             self.result.flammability_class = flam_result["hazard"]
 
-        # 7. 水生环境危害
+        # 7. 氧化性
+        oxidizer_result = self.check_oxidizer()
+        if oxidizer_result:
+            self.result.classifications.append(oxidizer_result)
+
+        # 8. 水生环境危害
         aquatic_results = self.check_aquatic_toxicity()
         self.result.classifications.extend(aquatic_results)
 
-        # 8. 金属腐蚀
+        # 9. 金属腐蚀
         corrosion_result = self.check_metal_corrosion()
         if corrosion_result:
             self.result.classifications.append(corrosion_result)
 
-        # 9. 桥接原则评估
+        # 10. 桥接原则评估
         bridging = self.check_bridging_principles()
         if bridging:
             self.result.calculation_log.append(f"\n{'='*60}")
@@ -932,6 +998,16 @@ class MixtureCalculator:
                 organs = re.findall(r'[\(（]([^)）]+)[\)）]', h)
                 for organ in organs:
                     stot_re_cat1_organs.update(organ.replace("，", ",").replace("、", ",").split(","))
+        if stot_re_cat1_organs:
+            for i, c in enumerate(self.result.classifications):
+                h = c.get("hazard", "")
+                if "反复" in h and ("类别2" in h or "Cat 2" in h):
+                    cat2_organs = re.findall(r'[\(（]([^)）]+)[\)）]', h)
+                    cat2_organ_set = set()
+                    for organ in cat2_organs:
+                        cat2_organ_set.update(organ.replace("，", ",").replace("、", ",").split(","))
+                    if cat2_organ_set & stot_re_cat1_organs:
+                        to_remove.add(i)
 
         if to_remove:
             self.result.classifications = [

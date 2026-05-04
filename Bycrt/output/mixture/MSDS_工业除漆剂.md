@@ -236,15 +236,15 @@
 
 # 第十一部分：毒理学信息
 
-**LD50经口**: ATE ≈ 2220 mg/kg（混合物估算值） <!-- src:classification conf:1.0 -->
+**LD50经口**: ATE ≈ 2663 mg/kg（混合物估算值） <!-- src:classification conf:1.0 -->
 
 **LD50经皮**: ATE ≈ 2836 mg/kg（混合物估算值） <!-- src:classification conf:1.0 -->
 
 **LC50吸入**: 约 86 mg/L (4小时，大鼠) <!-- src:kb conf:1.0 -->
 
-**皮肤腐蚀/刺激**: 皮肤腐蚀/刺激 - 类别 2 <!-- src:classification conf:1.0 -->
+**皮肤腐蚀/刺激**: 皮肤腐蚀/刺激，类别2 <!-- src:classification conf:1.0 -->
 
-**严重眼损伤/眼刺激**: 眼刺激 (类别 2A) <!-- src:classification conf:1.0 -->
+**严重眼损伤/眼刺激**: 严重眼损伤/眼刺激，类别2A <!-- src:classification conf:1.0 -->
 
 **皮肤致敏**: 无可用数据 [待确认]
 
@@ -310,20 +310,20 @@
 
 | 项目 | 内容 |
 |------|------|
-| UN编号 | UN 2924 <!-- src:classification conf:1.0 --> |
-| 正式运输名称 | 腐蚀性液体，易燃，未另作规定的 <!-- src:classification conf:1.0 --> |
-| 运输危险类别 | 8（主要），3（次要） <!-- src:classification conf:1.0 --> |
+| UN编号 | UN 1993 <!-- src:classification conf:1.0 --> |
+| 正式运输名称 | 易燃液体，未另作规定的 <!-- src:classification conf:1.0 --> |
+| 运输危险类别 | 3 <!-- src:classification conf:1.0 --> |
 | 包装类别 | III <!-- src:classification conf:1.0 --> |
 | 海洋污染物 | 是（含对水生环境有害组分） <!-- src:classification conf:1.0 --> |
 
 **公路和铁路运输**:
-主要危险类别 8，次要危险类别 3，腐蚀性液体，易燃，未另作规定的 <!-- src:classification conf:1.0 -->。
+危险类别 3 <!-- src:classification conf:1.0 -->，易燃液体，未另作规定的 <!-- src:classification conf:1.0 -->。
 
 **海运分类(IMO-IMDG)**:
-IMDG: 主要危险类别 8，次要危险类别 3，UN 2924 <!-- src:classification conf:1.0 -->，腐蚀性液体，易燃，未另作规定的 <!-- src:classification conf:1.0 -->。
+IMDG: 危险类别 3 <!-- src:classification conf:1.0 -->，UN 1993 <!-- src:classification conf:1.0 -->，易燃液体，未另作规定的 <!-- src:classification conf:1.0 -->。
 
 **空运分类(IATA/ICAO)**:
-IATA/ICAO: 主要危险类别 8，次要危险类别 3，UN 2924 <!-- src:classification conf:1.0 -->，腐蚀性液体，易燃，未另作规定的 <!-- src:classification conf:1.0 -->。
+IATA/ICAO: 危险类别 3 <!-- src:classification conf:1.0 -->，UN 1993 <!-- src:classification conf:1.0 -->，易燃液体，未另作规定的 <!-- src:classification conf:1.0 -->。
 
 *此信息未计划传达所有关于此产品的特殊法规或操作要求。运输分类可能因容器体积和地区法规而不同。*
 
@@ -356,10 +356,10 @@ IATA/ICAO: 主要危险类别 8，次要危险类别 3，UN 2924 <!-- src:classi
 
 | 项目 | 内容 |
 |------|------|
-| SDS编号 | AUTO-20260503232446-3795 |
+| SDS编号 | AUTO-20260504131728-0052 |
 | 版本号 | 1.0 |
-| 编制日期 | 2026-05-03 |
-| 修订日期 | 2026-05-03 |
+| 编制日期 | 2026-05-04 |
+| 修订日期 | 2026-05-04 |
 
 **数据来源**: PubChem数据库, GHS分类规则, SDS模板, 本地知识库
 

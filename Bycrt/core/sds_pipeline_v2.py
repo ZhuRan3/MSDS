@@ -43,6 +43,7 @@ class PipelineResult:
     query: str = ""                   # 原始查询
     version: str = "1.0"              # 文档版本号
     revision_date: str = ""           # 修订日期
+    edit_json_path: str = ""          # 导出的可编辑JSON路径（--export-json时）
 
 
 class SDSPipeline:
@@ -373,6 +374,56 @@ class SDSPipeline:
                 result.append((cas, cas, conc))
         return result
 
+    def export_edit_json(self, md_content: str, md_path: str) -> str:
+        """
+        导出MSDS为结构化JSON，供人工编辑
+
+        Args:
+            md_content: MSDS Markdown内容
+            md_path: 原始MD文件路径（用于推导JSON路径）
+
+        Returns:
+            JSON文件路径
+        """
+        from msds_editor import MSDSEditor
+        editor = MSDSEditor()
+        json_path = str(Path(md_path).with_suffix(".json"))
+        editor.export_json(md_content, json_path)
+        print(f"  已导出可编辑JSON: {json_path}")
+        return json_path
+
+    def apply_override(self, md_content: str, override_path: str,
+                        output_path: str = "", generate_pdf: bool = False) -> str:
+        """
+        应用override JSON修改MSDS内容
+
+        Args:
+            md_content: 原始MSDS Markdown
+            override_path: override JSON文件路径
+            output_path: 输出路径（可选）
+            generate_pdf: 是否同时生成PDF
+
+        Returns:
+            修改后的Markdown
+        """
+        from msds_editor import MSDSEditor
+        editor = MSDSEditor()
+        editor.parse_md(md_content)
+        new_content = editor.apply_override_file(override_path)
+
+        if not output_path:
+            p = Path(override_path)
+            output_path = str(p.with_name(p.stem.replace("_edit", "") + "_v2.md"))
+
+        if generate_pdf:
+            editor.save_md_with_pdf(output_path)
+        else:
+            editor.save_md(output_path)
+
+        editor.print_diff_summary()
+        print(f"  已保存修改后MSDS: {output_path}")
+        return new_content
+
     def _save_output(self, path: str, content: str, generate_pdf: bool = False):
         """保存输出文件（MD + 可选 PDF）"""
         p = Path(path)
@@ -414,14 +465,49 @@ def main():
     parser.add_argument("--json", action="store_true", help="以JSON格式输出元数据")
     parser.add_argument("--use-llm", action="store_true", help="使用LLM增强文本生成")
     parser.add_argument("--pdf", action="store_true", help="同时输出PDF格式")
+    parser.add_argument("--export-json", action="store_true",
+                        help="导出结构化JSON供人工编辑（与--query/--mixture配合使用）")
+    parser.add_argument("--override", type=str, default="",
+                        help="应用override JSON修改已有MSDS（传入JSON文件路径）")
+    parser.add_argument("--review-edit", action="store_true",
+                        help="生成后自动审查高风险节并导出可编辑JSON")
 
     args = parser.parse_args()
 
-    if not args.query and not args.mixture:
+    if not args.query and not args.mixture and not args.override:
         parser.print_help()
         sys.exit(1)
 
     pipeline = SDSPipeline()
+
+    # 模式1: 应用override修改已有MSDS
+    if args.override and not args.query and not args.mixture:
+        override_path = args.override
+        if not Path(override_path).exists():
+            print(f"  [ERROR] override文件不存在: {override_path}")
+            sys.exit(1)
+        # 读取override JSON中记录的原始MD路径，或从JSON路径推导
+        with open(override_path, "r", encoding="utf-8") as f:
+            ov_data = json.load(f)
+        # 尝试找到原始MD文件
+        md_path = override_path.replace(".json", ".md").replace("_edit", "")
+        if not Path(md_path).exists():
+            # 尝试 _v2.md
+            md_path = override_path.replace("_edit.json", ".md").replace(".json", ".md")
+        if not Path(md_path).exists():
+            print(f"  [ERROR] 找不到原始MSDS文件，请用 --output 指定输出路径")
+            sys.exit(1)
+
+        with open(md_path, "r", encoding="utf-8") as f:
+            md_content = f.read()
+
+        output_path = args.output or ""
+        new_content = pipeline.apply_override(
+            md_content, override_path,
+            output_path=output_path, generate_pdf=args.pdf,
+        )
+        print(f"\n完成。修改后的文件已保存。")
+        return
 
     if args.query:
         result = pipeline.generate_pure(
@@ -458,6 +544,31 @@ def main():
         }
         print(f"\n--- Pipeline元数据 ---")
         print(json.dumps(meta, ensure_ascii=False, indent=2))
+
+    # --export-json: 导出结构化JSON供人工编辑
+    if args.export_json or args.review_edit:
+        json_path = pipeline.export_edit_json(result.markdown, result.file_path)
+        result.edit_json_path = json_path
+
+    # --review-edit: 审查高风险节并提示
+    if args.review_edit:
+        from msds_editor import MSDSEditor
+        editor = MSDSEditor()
+        editor.parse_md(result.markdown)
+        issues = editor.review_high_risk()
+        if issues:
+            print(f"\n{'='*60}")
+            print(f"  高风险节审查报告")
+            print(f"{'='*60}")
+            for issue in issues:
+                icon = {"high": "!!", "medium": "!", "low": "~"}[issue["severity"]]
+                print(f"  [{icon}] 节{issue['section']} {issue['title']}")
+                print(f"      问题: {issue['issue']}")
+                print(f"      建议: {issue['suggestion']}")
+            print(f"\n  请编辑以下JSON文件修改问题后，使用 --override 应用修改:")
+            print(f"  {result.edit_json_path}")
+        else:
+            print(f"\n  高风险审查通过，未发现问题。")
 
 
 if __name__ == "__main__":

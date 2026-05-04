@@ -292,6 +292,13 @@
       "shipping_name": "氧化性液体，毒性，未另作规定的",
       "primary": "5.1",
       "secondary": "6.1"
+    },
+    {
+      "classes": ["5.1", "8"],
+      "un_number": "3084",
+      "shipping_name": "氧化性液体，腐蚀性，未另作规定的",
+      "primary": "5.1",
+      "secondary": "8"
     }
   ],
   "chlorinated_cas": [
