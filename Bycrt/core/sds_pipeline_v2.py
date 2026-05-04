@@ -513,7 +513,7 @@ def main():
     parser.add_argument("--output", type=str, default="", help="输出文件路径")
     parser.add_argument("--json", action="store_true", help="以JSON格式输出元数据")
     parser.add_argument("--use-llm", action="store_true", help="使用LLM增强文本生成")
-    parser.add_argument("--pdf", action="store_true", help="同时输出PDF格式")
+    parser.add_argument("--pdf", action="store_true", default=True, help="同时输出PDF格式（默认开启）")
     parser.add_argument("--export-json", action="store_true",
                         help="导出结构化JSON供人工编辑（与--query/--mixture配合使用）")
     parser.add_argument("--override", type=str, default="",
