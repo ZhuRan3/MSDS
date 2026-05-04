@@ -1152,9 +1152,9 @@ class SDSGenerator:
             health_parts = []
             if "急性毒性" in ghs_text:
                 health_parts.append("具急性毒性")
-            if "皮肤腐蚀" in ghs_text:
+            if "皮肤腐蚀" in ghs_text and ("类别1" in ghs_text or "Cat 1" in ghs_text):
                 health_parts.append("引起皮肤灼伤")
-            if "皮肤刺激" in ghs_text:
+            elif "皮肤刺激" in ghs_text or "皮肤腐蚀/刺激" in ghs_text:
                 health_parts.append("可引起皮肤刺激")
             if "眼损伤" in ghs_text:
                 health_parts.append("可引起严重眼损伤")
@@ -2274,6 +2274,17 @@ class SDSGenerator:
             for key, desc in self.TOX_SYMPTOMS_KB.items():
                 if key in ("严重眼损伤", "眼刺激"):
                     continue  # 已在上面单独处理
+                # 皮肤腐蚀：区分Cat 1（真正腐蚀）和Cat 2（仅刺激）
+                if key == "皮肤腐蚀":
+                    if "皮肤腐蚀" in hazard and ("类别1" in hazard or "Cat 1" in hazard):
+                        if desc not in symptom_lines:
+                            symptom_lines.append(desc)
+                    elif "皮肤腐蚀/刺激" in hazard and ("类别2" in hazard or "Cat 2" in hazard):
+                        # Cat 2 用刺激描述
+                        irritant_desc = self.TOX_SYMPTOMS_KB.get("皮肤刺激", desc)
+                        if irritant_desc not in symptom_lines:
+                            symptom_lines.append(irritant_desc)
+                    continue
                 # 精确匹配分类名（完整关键词匹配，而非拆分片段）
                 _key_normalized = key.replace("STOT-", "靶器官毒性-").replace("单次", "").replace("反复", "")
                 if _key_normalized in hazard or key in hazard:
