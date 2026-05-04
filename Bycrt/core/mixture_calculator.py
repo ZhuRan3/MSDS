@@ -523,6 +523,15 @@ class MixtureCalculator:
             self.result.calculation_log.append(f"  → 易燃组分总浓度{flammable_conc:.1f}%<10%，不分类")
             return None
 
+        # FIX-flashpoint: 水溶液中低浓度有机物不应分类为易燃
+        water_conc = sum(c.concentration for c in self.components
+                        if c.name == "水" or "水" in c.name)
+        if water_conc > 60 and flammable_conc < 20:
+            self.result.calculation_log.append(
+                f"  → 水溶液中有机物浓度低(易燃{flammable_conc:.0f}%/水{water_conc:.0f}%)，"
+                f"实际闪点>60°C，不分类为易燃")
+            return None
+
         # 取最低闪点为混合物闪点参考，同时取最低初沸点
         if flash_points:
             min_fp = min(flash_points, key=lambda x: x[1])
@@ -1033,7 +1042,10 @@ def load_component_from_kb(cas: str, name: str = "") -> Optional[Dict]:
 
 
 def _parse_numeric(value) -> Optional[float]:
-    """从字符串中提取数值，如 '7060 mg/kg（大鼠）' → 7060.0"""
+    """从字符串中提取数值，如 '7060 mg/kg（大鼠）' → 7060.0
+    FIX-ATE: 优先提取mg/kg或mg/L前的数值（LD50/LC50场景），
+    避免'LD50'中的数字'50'被误提取。
+    """
     if value is None:
         return None
     if isinstance(value, (int, float)):
@@ -1042,7 +1054,26 @@ def _parse_numeric(value) -> Optional[float]:
     if not s or s in ("-", "无数据", "无", "不适用"):
         return None
     import re
-    match = re.search(r'[\d.]+', s.replace(',', ''))
+    s_clean = s.replace(',', '')
+    # 优先匹配 mg/kg 或 mg/L 前面的数值
+    m = re.search(r'([\d.]+)\s*mg/[kL]', s_clean)
+    if m:
+        try:
+            return float(m.group(1))
+        except ValueError:
+            pass
+    # 其次匹配范围值：取中间值（如 "1600-2000" → 1800）
+    m = re.search(r'([\d.]+)\s*[-–—~～]\s*([\d.]+)', s_clean)
+    if m:
+        try:
+            low, high = float(m.group(1)), float(m.group(2))
+            return round((low + high) / 2, 1)
+        except ValueError:
+            pass
+    # 最后：提取第一个独立的数值（跳过LD50/LC50中的数字）
+    # 先移除LD50/LC50等标识符中的数字
+    s_no_ld = re.sub(r'(?:LD|LC|EC)\d+', '', s_clean, flags=re.IGNORECASE)
+    match = re.search(r'[\d.]+', s_no_ld)
     if match:
         try:
             return float(match.group())

@@ -211,29 +211,40 @@
     },
     {
       "ghs_keywords": [
-        "氧化性"
+        "氧化性液体",
+        "氧化性固体"
       ],
       "class": "5.1",
       "shipping_name": "氧化性物质"
     },
     {
       "ghs_keywords": [
-        "急性毒性"
+        "急性毒性-经口，类别1",
+        "急性毒性-经口，类别2",
+        "急性毒性-经口，类别3",
+        "急性毒性-经皮，类别1",
+        "急性毒性-经皮，类别2",
+        "急性毒性-经皮，类别3",
+        "急性毒性-吸入，类别1",
+        "急性毒性-吸入，类别2",
+        "急性毒性-吸入，类别3"
       ],
       "class": "6.1",
-      "shipping_name": "毒性物质"
+      "shipping_name": "毒性物质",
+      "_note": "FIX-transport: 仅Cat1-3急性毒性才构成运输6.1类，Cat4/5不构成"
     },
     {
       "ghs_keywords": [
-        "腐蚀"
+        "皮肤腐蚀/刺激，类别1",
+        "金属腐蚀物"
       ],
       "class": "8",
-      "shipping_name": "腐蚀性物质"
+      "shipping_name": "腐蚀性物质",
+      "_note": "FIX-transport: 仅皮肤腐蚀Cat1或金属腐蚀才构成运输8类，Cat2不构成"
     },
     {
       "ghs_keywords": [
-        "水生环境",
-        "环境"
+        "危害水生环境-长期危害，类别1"
       ],
       "class": "9",
       "shipping_name": "环境危害物质"
@@ -274,6 +285,13 @@
       "shipping_name": "毒性液体，腐蚀性，未另作规定的",
       "primary": "6.1",
       "secondary": "8"
+    },
+    {
+      "classes": ["5.1", "6.1"],
+      "un_number": "3139",
+      "shipping_name": "氧化性液体，毒性，未另作规定的",
+      "primary": "5.1",
+      "secondary": "6.1"
     }
   ],
   "chlorinated_cas": [
@@ -359,18 +377,22 @@
       "un_number": "1993"
     },
     {
-      "formula_pattern": "N.*C.*H.*",
+      "formula_pattern": "NH2.*C.*",
+      "chemical_family": "胺类化合物",
+      "un_number": "UN编号需根据具体物质确定",
+      "_note": "苯胺(C6H7N)、甲胺(CH5N)等胺类 — 不应归类为腈类"
+    },
+    {
+      "formula_pattern": "NO2.*C.*",
+      "chemical_family": "硝基化合物",
+      "un_number": "UN编号需根据具体物质确定",
+      "_note": "硝基苯(C6H5NO2)等硝基化合物"
+    },
+    {
+      "formula_pattern": "C[\\d]*N$",
       "chemical_family": "腈类化合物",
-      "un_number": "1648",
-      "ghs_classifications": [
-        "急性毒性-经口，类别3",
-        "急性毒性-经皮，类别3",
-        "急性毒性-吸入，类别3"
-      ],
-      "pictograms": [
-        "GHS06"
-      ],
-      "signal_word": "危险"
+      "un_number": "UN编号需根据具体物质确定",
+      "_note": "仅匹配以C和N结尾的腈类(如乙腈C2H3N)，不再使用N.*C.*H.*宽泛匹配"
     },
     {
       "formula_pattern": "OH.*(Na|K|Ca).*",

@@ -842,6 +842,24 @@ class SDSGenerator:
 
         return "不适用"
 
+    def _get_oxidizer_text(self) -> str:
+        """FIX-oxidizer: 根据GHS分类生成S9氧化性字段文本"""
+        for cls in getattr(self, '_classifications', []):
+            hazard = cls.get("hazard", "")
+            if "氧化" in hazard:
+                return hazard
+        # 检查组分是否有氧化性分类
+        if getattr(self, '_is_mixture', False):
+            for comp in getattr(self, '_components_data', []):
+                ghs_raw = comp.get("ghs_classifications", "")
+                if isinstance(ghs_raw, list):
+                    ghs_text = " ".join(str(g) for g in ghs_raw)
+                else:
+                    ghs_text = str(ghs_raw) if ghs_raw else ""
+                if "氧化" in ghs_text:
+                    return "含氧化性组分"
+        return "此物质或混合物不被分类为氧化剂。"
+
     def _get_chemical_types(self) -> List[str]:
         """根据GHS分类+物性推断化学品类型标签列表（从JSON规则驱动）"""
         types = set()
@@ -1732,27 +1750,42 @@ class SDSGenerator:
             elif "corrosive_alkali" in chem_types_s9:
                 ph_val = ">13 (强碱性)"
             elif getattr(self, '_is_mixture', False):
-                # 混合物：检查是否有酸/碱组分
-                comp_types = set()
+                # 混合物：根据组分的实际酸碱性和浓度判断pH
+                # FIX-pH: 只有含强酸/强碱组分且浓度>1%时才推断酸碱性
+                _has_acid = False
+                _has_alkali = False
                 for comp in getattr(self, '_components_data', []):
                     comp_ghs = comp.get("ghs_classifications", [])
                     if isinstance(comp_ghs, str):
                         comp_ghs = [comp_ghs]
                     comp_ghs_text = " ".join(str(g) for g in comp_ghs)
-                    if "腐蚀" in comp_ghs_text:
-                        comp_formula = str(comp.get("molecular_formula", ""))
-                        acid_hints = ["HCl", "H2SO4", "HNO3", "H3PO4", "HF"]
-                        alkali_hints = ["NaOH", "KOH", "Ca(OH)2", "NH3"]
-                        if any(h in comp_formula for h in acid_hints):
-                            comp_types.add("acid")
-                        elif any(h in comp_formula for h in alkali_hints):
-                            comp_types.add("alkali")
-                if "acid" in comp_types:
+                    comp_formula = str(comp.get("molecular_formula", ""))
+                    comp_conc_str = str(comp.get("concentration", "0")).replace("%", "")
+                    try:
+                        comp_conc = float(comp_conc_str)
+                    except (ValueError, TypeError):
+                        comp_conc = 0
+                    if comp_conc < 1.0:
+                        continue  # 浓度<1%的组分对pH影响可忽略
+                    # 检测酸：无机酸或有机酸
+                    acid_formulas = ["HCl", "H2SO4", "HNO3", "H3PO4", "HF", "HCOOH", "CH3COOH"]
+                    alkali_formulas = ["NaOH", "KOH", "Ca(OH)2", "NH3", "NaClO"]
+                    acid_names = ["酸"]
+                    alkali_names = ["氢氧化", "碱", "次氯酸钠"]
+                    if (any(f in comp_formula for f in acid_formulas)
+                        or any(n in str(comp.get("chemical_name_cn", "")) for n in acid_names)):
+                        _has_acid = True
+                    if (any(f in comp_formula for f in alkali_formulas)
+                        or any(n in str(comp.get("chemical_name_cn", "")) for n in alkali_names)):
+                        _has_alkali = True
+                if _has_acid and _has_alkali:
+                    ph_val = "取决于配比（需实测）"
+                elif _has_acid:
                     ph_val = "酸性（需实测）"
-                elif "alkali" in comp_types:
+                elif _has_alkali:
                     ph_val = "碱性（需实测）"
                 else:
-                    ph_val = "需实测"
+                    ph_val = "不适用（有机溶剂混合物）"
             else:
                 # 中性有机物：乙醇、丙酮等
                 neutral_organics = ["C2H6O", "C3H6O", "C6H12O", "C4H10O"]
@@ -1825,7 +1858,7 @@ class SDSGenerator:
             f"| 分解温度 | {_s9('decomposition_temperature', '无可用数据')} |\n"
             f"| 动态粘度 | 无可用数据 |\n"
             f"| 爆炸特性 | 无爆炸性 |\n"
-            f"| 氧化性 | 此物质或混合物不被分类为氧化剂。 |"
+            f"| 氧化性 | {self._get_oxidizer_text()} |"
         )
 
     def _infer_decomposition_products(self) -> str:
@@ -1946,6 +1979,31 @@ class SDSGenerator:
             reaction_notes.append("含卤素有机物与活泼金属（铝、镁、锌）反应可产生有毒气体。含氯有机物在紫外线或高温下可分解产生光气（碳酰氯），应避免阳光直射。")
         if "易燃" in all_ghs_s10 and ("氧化" in all_ghs_s10 or "过氧化" in all_ghs_s10):
             reaction_notes.append("与强氧化剂剧烈反应，有火灾和爆炸危险。")
+        # FIX-incompat: 检测配方内部组分间不相容性（氧化剂+有机物）
+        if getattr(self, '_is_mixture', False) and comps:
+            has_oxidizer_comp = False
+            has_organic_flammable = False
+            oxidizer_names = []
+            organic_names = []
+            for comp in comps:
+                cn = str(comp.get("chemical_name_cn", comp.get("name", "")))
+                formula = str(comp.get("molecular_formula", ""))
+                cg = comp.get("ghs_classifications", "")
+                if isinstance(cg, list):
+                    cg_text = " ".join(str(g) for g in cg)
+                else:
+                    cg_text = str(cg) if cg else ""
+                if "氧化" in cg_text or "过氧化" in cg_text:
+                    has_oxidizer_comp = True
+                    oxidizer_names.append(cn)
+                if ("易燃" in cg_text or ("C" in formula and "H" in formula)) and "氧化" not in cg_text:
+                    has_organic_flammable = True
+                    organic_names.append(cn)
+            if has_oxidizer_comp and has_organic_flammable:
+                reaction_notes.append(
+                    f"⚠ 配方内部不相容警告：含氧化性组分（{', '.join(oxidizer_names)}）"
+                    f"与可燃有机物（{', '.join(organic_names[:3])}）混合，"
+                    f"可能自发放热甚至导致爆炸。应评估配方的化学稳定性。")
         if reaction_notes:
             hazard_reaction = "\n\n**危险反应**: " + " ".join(reaction_notes)
 
@@ -2866,9 +2924,29 @@ def generate_mixture_sds(components_data: List[dict],
             solubilities.append(sol)
 
     if flash_points:
-        # 混合物闪点取最低值（最危险）
-        min_fp = min(flash_points)
-        s9.fields["flash_point"] = FieldValue(value=f"{min_fp:.0f}（最低组分值）", source="aggregation")
+        # FIX-flashpoint: 水溶液中低浓度有机溶剂的闪点不等于纯品闪点
+        # 检测水含量：如果水>60%，易燃有机物<20%，闪点可能>60°C
+        water_conc = 0.0
+        flammable_organic_conc = 0.0
+        for comp, conc in comp_with_conc:
+            cn = str(comp.get("chemical_name_cn", ""))
+            formula = str(comp.get("molecular_formula", ""))
+            if cn == "水" or formula == "H2O":
+                water_conc += conc
+            ghs_raw = comp.get("ghs_classifications", "")
+            if isinstance(ghs_raw, list):
+                ghs_text = " ".join(str(g) for g in ghs_raw)
+            else:
+                ghs_text = str(ghs_raw) if ghs_raw else ""
+            if "易燃" in ghs_text and "C" in formula:
+                flammable_organic_conc += conc
+        if water_conc > 60 and flammable_organic_conc < 20:
+            s9.fields["flash_point"] = FieldValue(
+                value="不适用（水溶液中有机物浓度低，实际闪点>60°C）", source="aggregation")
+        else:
+            # 混合物闪点取最低值（最危险）
+            min_fp = min(flash_points)
+            s9.fields["flash_point"] = FieldValue(value=f"{min_fp:.0f}（最低组分值）", source="aggregation")
     if boiling_points:
         bp_min = min(boiling_points)
         bp_max = max(boiling_points)
@@ -3067,7 +3145,7 @@ def generate_mixture_sds(components_data: List[dict],
     if lc50_val and "固体" in str(lc50_val.value):
         s11.fields["lc50_inhalation"] = FieldValue(value="无可用数据", source="classification")
 
-    # 混合物S11毒理：从组分GHS分类反填（皮肤/眼/致癌/生殖/STOT等）
+    # 混合物S11毒理：从组分GHS分类反填（致癌/生殖/STOT等）
     # 扫描所有组分的ghs_classifications，聚合各危害类别
     all_comp_ghs = []
     for comp in components_data:
@@ -3078,10 +3156,21 @@ def generate_mixture_sds(components_data: List[dict],
             all_comp_ghs.append(str(ghs_raw))
     all_ghs_text = " ".join(str(g) for g in all_comp_ghs)
 
-    # 皮肤腐蚀/刺激 — 取最严重等级
-    if any(kw in all_ghs_text for kw in ["皮肤腐蚀", "皮肤刺激"]):
+    # 皮肤腐蚀/刺激 — FIX-S2S11: 优先从混合物分类结果(S2)取，确保一致性
+    skin_from_mixture = [c for c in mixture_classifications
+                         if "皮肤腐蚀" in c.get("hazard", "") or "皮肤刺激" in c.get("hazard", "")]
+    if skin_from_mixture:
+        # 取最严重等级（Cat1 > Cat2）
+        best_skin = skin_from_mixture[0]
+        for c in skin_from_mixture:
+            if "类别1" in c.get("hazard", "") or "Cat 1" in c.get("hazard", ""):
+                best_skin = c
+                break
+        s11.fields["skin_corrosion_category"] = FieldValue(
+            value=best_skin["hazard"], source="classification")
+    elif any(kw in all_ghs_text for kw in ["皮肤腐蚀", "皮肤刺激"]):
+        # fallback: 从组分取（仅当混合物分类中无此分类时）
         skin_cats = [g for g in all_comp_ghs if "皮肤腐蚀" in str(g) or "皮肤刺激" in str(g)]
-        # 优先取腐蚀(Cat1) > 刺激(Cat2)
         has_corrosion = any("皮肤腐蚀" in str(c) and ("Cat 1" in str(c) or "类别1" in str(c)) for c in skin_cats)
         if has_corrosion:
             best = next(c for c in skin_cats if "皮肤腐蚀" in str(c) and ("Cat 1" in str(c) or "类别1" in str(c)))
@@ -3091,8 +3180,19 @@ def generate_mixture_sds(components_data: List[dict],
             best = skin_cats[0]
         s11.fields["skin_corrosion_category"] = FieldValue(
             value=str(best), source="classification")
-    # 严重眼损伤/眼刺激 — 取最严重等级
-    if any(kw in all_ghs_text for kw in ["眼损伤", "眼刺激"]):
+    # 严重眼损伤/眼刺激 — FIX-S2S11: 优先从混合物分类结果(S2)取
+    eye_from_mixture = [c for c in mixture_classifications
+                        if "眼损伤" in c.get("hazard", "") or "眼刺激" in c.get("hazard", "")]
+    if eye_from_mixture:
+        best_eye = eye_from_mixture[0]
+        for c in eye_from_mixture:
+            if "类别1" in c.get("hazard", "") or "Cat 1" in c.get("hazard", ""):
+                best_eye = c
+                break
+        s11.fields["eye_damage_category"] = FieldValue(
+            value=best_eye["hazard"], source="classification")
+    elif any(kw in all_ghs_text for kw in ["眼损伤", "眼刺激"]):
+        # fallback: 从组分取
         eye_cats = [g for g in all_comp_ghs if "眼损伤" in str(g) or "眼刺激" in str(g)]
         has_severe = any("眼损伤" in str(c) and ("Cat 1" in str(c) or "类别1" in str(c) or "类别 1" in str(c)) for c in eye_cats)
         if has_severe:
