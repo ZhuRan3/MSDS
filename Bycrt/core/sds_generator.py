@@ -3238,10 +3238,12 @@ def generate_mixture_sds(components_data: List[dict],
         # 推断外观：根据主组分浓度和物态
         s9.fields["appearance"] = FieldValue(value="液体（根据组分推断）", source="inference")
     # 气味推断：根据组分类型区分有机溶剂/水溶液
-    _has_organic_solvent = any(
-        ("C" in str(comp.get("molecular_formula", "")) and "H" in str(comp.get("molecular_formula", "")))
-        for comp, _ in comp_with_conc
+    # 只有有机溶剂组分浓度合计>20%才标记为"含有机溶剂组分"
+    _organic_solvent_conc = sum(
+        conc for comp, conc in comp_with_conc
+        if ("C" in str(comp.get("molecular_formula", "")) and "H" in str(comp.get("molecular_formula", "")))
     )
+    _has_organic_solvent = _organic_solvent_conc > 20
     if _has_organic_solvent:
         s9.fields["odor"] = FieldValue(value="有特殊气味（含有机溶剂组分）", source="inference")
     else:
