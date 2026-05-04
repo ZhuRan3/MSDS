@@ -161,6 +161,22 @@ class MSDSEditor:
             risk = self._get_risk_level(sec_num)
             fields = self._extract_fields(content)
 
+            # 标记含[待确认]的字段，方便用户定位
+            needs_review = [
+                {"field": k, "current_value": v}
+                for k, v in fields.items()
+                if "[待确认]" in v or "需实测" in v or "无可用数据" in v
+            ]
+            # 也扫描content中的待确认行（非表格字段）
+            for line in content.split("\n"):
+                if "[待确认]" in line or "需实测" in line:
+                    # 提取加粗标签
+                    label_m = re.match(r'\*\*(.+?)\*\*', line.strip())
+                    if label_m:
+                        label = label_m.group(1)
+                        if not any(n["field"] == label for n in needs_review):
+                            needs_review.append({"field": label, "current_value": line.strip()})
+
             # 保存原始字段值
             self._original_fields[str(sec_num)] = dict(fields)
 
@@ -171,6 +187,7 @@ class MSDSEditor:
                 "tables": self._extract_tables(content),
                 "fields": fields,
                 "fields_original": dict(fields),  # 保存原始值，用于检测修改
+                "needs_review": needs_review,      # 待确认字段清单
                 "overrides": [],  # 用户填写的修改规则
             }
             result["sections"][str(sec_num)] = section_data
@@ -467,7 +484,9 @@ class MSDSEditor:
                 sys.path.insert(0, core_dir)
             from pdf_generator import generate_pdf
             pdf_path = str(Path(output_path).with_suffix('.pdf'))
-            generate_pdf(md_path, pdf_path, title=Path(output_path).stem)
+            # 读取Markdown内容（generate_pdf第一个参数是内容不是路径）
+            md_content = Path(md_path).read_text(encoding='utf-8')
+            generate_pdf(md_content, pdf_path, title=Path(output_path).stem)
             print(f"  已保存PDF: {pdf_path}")
         except Exception as e:
             print(f"  [WARN] PDF生成失败: {e}")

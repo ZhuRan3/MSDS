@@ -503,8 +503,13 @@ def main():
             print(f"  [ERROR] override文件不存在: {override_path}")
             sys.exit(1)
         # 读取override JSON中记录的原始MD路径，或从JSON路径推导
-        with open(override_path, "r", encoding="utf-8") as f:
-            ov_data = json.load(f)
+        try:
+            with open(override_path, "r", encoding="utf-8") as f:
+                ov_data = json.load(f)
+        except json.JSONDecodeError as e:
+            print(f"  [ERROR] JSON格式错误: {e}")
+            print(f"  请检查文件: {override_path}")
+            sys.exit(1)
         # 尝试找到原始MD文件
         md_path = override_path.replace(".json", ".md").replace("_edit", "")
         if not Path(md_path).exists():

@@ -484,7 +484,7 @@ class SDSGenerator:
             s10.fields["conditions_to_avoid"] = FieldValue(value="明火、高热、静电、火花。", source="kb")
         elif "氧化" in ghs_text:
             s10.fields["conditions_to_avoid"] = FieldValue(value="热源、污染、可燃物、还原剂、金属粉末。", source="kb")
-        elif "腐蚀" in ghs_text:
+        elif self._has_classification("腐蚀", require_cat1=True):
             # 酸/碱水溶液不应建议"避免潮湿/水"
             _acid_hints_s10ca = ["酸", "HCl", "H2SO4", "HNO3", "H3PO4", "HF"]
             _alkali_hints_s10ca = ["碱", "NaOH", "KOH", "Ca(OH)2", "氢氧化", "次氯酸钠", "NaClO"]
@@ -604,12 +604,14 @@ class SDSGenerator:
 
         s2.fields["ghs_classifications"] = FieldValue(value=ghs_classes, source="classification")
         s2.fields["hazard_statements"] = FieldValue(value=h_codes, source="classification")
-        # 信号词: 优先使用分类结果，fallback到KB数据
+        # 信号词: 优先使用分类结果，fallback到KB数据，最终fallback到"警告"
         sw = "危险" if "危险" in signal_words else ("警告" if "警告" in signal_words else "")
         if not sw:
             kb_sw = self._kb_data.get("signal_word", "")
             if kb_sw:
                 sw = kb_sw
+        if not sw:
+            sw = "警告 [待确认]"
         s2.fields["signal_word"] = FieldValue(value=sw, source="classification")
         s2.fields["pictograms"] = FieldValue(value=all_pictograms, source="classification")
 
@@ -832,10 +834,19 @@ class SDSGenerator:
         main_val = re.sub(r'\s*g/mL\b', '', main_val)
         return main_val.strip() + comment
 
-    def _has_classification(self, keyword: str) -> bool:
-        """检查分类中是否包含某关键词"""
+    def _has_classification(self, keyword: str, require_cat1: bool = False) -> bool:
+        """检查分类中是否包含某关键词。
+        require_cat1=True时，对"皮肤腐蚀/刺激"类仅匹配Cat 1（真正的腐蚀），排除Cat 2（仅刺激）"""
         for cls in getattr(self, '_classifications', []):
-            if keyword in cls.get("hazard", ""):
+            hazard = cls.get("hazard", "")
+            if require_cat1 and keyword == "腐蚀":
+                # 区分真正的皮肤腐蚀(Cat 1)和皮肤刺激(Cat 2)
+                if "皮肤腐蚀" in hazard and ("类别1" in hazard or "Cat 1" in hazard):
+                    return True
+                if "金属腐蚀" in hazard:
+                    return True
+                continue
+            if keyword in hazard:
                 return True
         return False
 
@@ -989,7 +1000,7 @@ class SDSGenerator:
             )
             chem_data = getattr(self, '_kb_data', {})
             is_flammable = self._has_classification("易燃")
-            is_corrosive = self._has_classification("腐蚀")
+            is_corrosive = self._has_classification("腐蚀", require_cat1=True)
             is_toxic = self._has_classification("毒性") or self._has_classification("有毒")
 
             if section_id == 4:
@@ -1126,7 +1137,7 @@ class SDSGenerator:
             phys_chem_hazard = "可燃液体。" if "类别 4" in ghs_text or "类别4" in ghs_text else "极易燃液体和蒸气。"
         elif "氧化" in ghs_text:
             phys_chem_hazard = "可加剧燃烧。"
-        elif "腐蚀" in ghs_text:
+        elif self._has_classification("腐蚀", require_cat1=True):
             phys_chem_hazard = "具腐蚀性。"
         elif "加压" in ghs_text:
             phys_chem_hazard = "含加压气体。"
@@ -1233,9 +1244,9 @@ class SDSGenerator:
         health = []
         if "急性毒性" in ghs_text:
             health.append("具急性毒性")
-        if "皮肤腐蚀" in ghs_text:
+        if "皮肤腐蚀" in ghs_text and ("类别1" in ghs_text or "Cat 1" in ghs_text):
             health.append("引起皮肤灼伤")
-        if "腐蚀" in ghs_text and "皮肤腐蚀" not in ghs_text:
+        if "金属腐蚀" in ghs_text:
             health.append("具腐蚀性")
         if "眼损伤" in ghs_text:
             health.append("有严重损害眼睛的危险")
@@ -1385,7 +1396,7 @@ class SDSGenerator:
                 # 仅当替代类型的建议有主类型缺少的关键内容时才追加
                 if alt_text and alt_text != primary_text:
                     # 提取关键差异部分（简化：直接追加标注来源类型）
-                    extra_by_route[route].append(f"[{t}] {alt_text}")
+                    extra_by_route[route].append(alt_text)
 
         # 混合物模式：聚合所有组分的特异性注释和靶器官建议
         mixture_notes = {"inhalation": [], "skin": [], "eye": [], "ingestion": []}
@@ -1621,7 +1632,7 @@ class SDSGenerator:
         """第六部分：泄漏应急处理（含气体/固体/液体差异）"""
         is_flammable = self._has_classification("易燃")
         is_toxic = self._has_classification("急性毒性")
-        is_corrosive = self._has_classification("腐蚀")
+        is_corrosive = self._has_classification("腐蚀", require_cat1=True)
 
         # 检测化学品类型
         kb_data = getattr(self, '_kb_data', {})
@@ -1748,7 +1759,7 @@ class SDSGenerator:
     def generate_section_8(self) -> str:
         """第八部分：接触控制/个体防护"""
         s8 = self.document.sections[8]
-        is_corrosive = self._has_classification("腐蚀")
+        is_corrosive = self._has_classification("腐蚀", require_cat1=True)
         is_toxic = self._has_classification("急性毒性")
         is_flammable = self._has_classification("易燃")
 
@@ -1871,9 +1882,12 @@ class SDSGenerator:
                 elif "corrosive_alkali" in chem_types_s9:
                     ph_val = ">13 (强碱性) [待确认]"
                 else:
-                    # 中性有机物：乙醇、丙酮等
+                    # 有机溶剂：pH不适用（非水溶性物质）
+                    organic_types = {"flammable_liquid", "organic_solvent"}
                     neutral_organics = ["C2H6O", "C3H6O", "C6H12O", "C4H10O"]
-                    if formula_s9 in neutral_organics:
+                    if organic_types & set(chem_types_s9):
+                        ph_val = "不适用（有机溶剂，非水溶性） [待确认]"
+                    elif formula_s9 in neutral_organics:
                         ph_val = "约7 (中性)"
                     else:
                         ph_val = "需实测 [待确认]"
@@ -2501,10 +2515,10 @@ class SDSGenerator:
                     ghs_text = str(ghs_raw) if ghs_raw else ""
                 # 碱类 → HW35
                 cn_name = str(comp.get("chemical_name_cn", ""))
-                if "腐蚀" in ghs_text and \
-                   any(h in cn_name for h in ["氢氧化", "氢氧化钠", "氢氧化钾", "氢氧化钙"]):
-                    if "HW35（废碱）" not in waste_codes:
-                        waste_codes.append("HW35（废碱）")
+                if ("皮肤腐蚀" in ghs_text and ("类别1" in ghs_text or "Cat 1" in ghs_text)) or "金属腐蚀" in ghs_text:
+                    if any(h in cn_name for h in ["氢氧化", "氢氧化钠", "氢氧化钾", "氢氧化钙"]):
+                        if "HW35（废碱）" not in waste_codes:
+                            waste_codes.append("HW35（废碱）")
                 # 酸类 → HW34
                 formula = str(comp.get("molecular_formula", ""))
                 if any(kw in ghs_text for kw in ["皮肤腐蚀", "金属腐蚀"]) and \
@@ -2895,6 +2909,8 @@ def generate_pure_sds(kb_data: dict, product_name: str = "",
     }])
 
     content = gen.generate()
+    # 清除来源注释（HTML注释不写入最终输出）
+    content = re.sub(r'\s*<!--\s*src:[^>]*-->', '', content)
     return content, gen.get_review_flags()
 
 
@@ -3505,10 +3521,9 @@ def generate_mixture_sds(components_data: List[dict],
         s10.fields["hazardous_decomposition"] = FieldValue(value="；".join(sorted(all_decomp)) + "（推断值）", source="inference")
 
     content = gen.generate()
+    # 清除来源注释（HTML注释不写入最终输出）
+    content = re.sub(r'\s*<!--\s*src:[^>]*-->', '', content)
     return content, gen.get_review_flags()
-
-
-# ============================================================
 # CLI入口
 # ============================================================
 

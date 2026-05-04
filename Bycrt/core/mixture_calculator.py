@@ -181,9 +181,16 @@ class MixtureCalculator:
         """验证组分数据有效性"""
         total = sum(c.concentration for c in self.components)
         if abs(total - 100.0) > 1.0:
-            self.result.calculation_log.append(
-                f"⚠ 浓度总和为{total:.1f}%，不等于100%，请检查"
-            )
+            msg = f"⚠ 浓度总和为{total:.1f}%，不等于100%，计算结果可能不准确 [待确认]"
+            self.result.calculation_log.append(msg)
+            # 在分类中添加显眼警告
+            self.result.classifications.append({
+                "hazard": f"浓度警告：组分浓度总和为{total:.1f}%（应为100%）",
+                "h_code": "",
+                "signal": "警告",
+                "reason": "浓度总和不等于100%，GHS分类计算结果可能不准确",
+                "classification_confidence": 0.3,
+            })
         for c in self.components:
             if c.concentration <= 0:
                 raise ValueError(f"组分 {c.name} 浓度必须>0")
